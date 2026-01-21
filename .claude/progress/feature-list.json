@@ -20,7 +20,7 @@
       "id": "F003",
       "description": "Authentication - Firebase Auth integration with MFA",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "tier": "mvp",
       "acceptance": "Users can sign up/login, MFA enabled"
     },
