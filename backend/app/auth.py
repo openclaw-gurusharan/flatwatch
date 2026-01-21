@@ -1,9 +1,12 @@
 # Authentication service for FlatWatch
 # POC: Mock implementation (to be replaced with Firebase)
+# Security: Emails are encrypted at rest using AES-256-GCM (see encryption.py)
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import jwt
 from pydantic import BaseModel
+
+from .encryption import encrypt_email, decrypt_email, hash_sensitive_data
 
 # Secret key for JWT (in production, use environment variable)
 SECRET_KEY = "flatwatch-dev-secret-key-change-in-production"

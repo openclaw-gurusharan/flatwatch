@@ -14,6 +14,10 @@ class ChallengeCreate(BaseModel):
     reason: str
 
 
+class ChallengeReject(BaseModel):
+    reason: str
+
+
 class ChallengeResponse(BaseModel):
     id: int
     transaction_id: int
@@ -56,7 +60,7 @@ async def create_challenge(
 
     # Fetch created challenge
     cursor = conn.execute("SELECT * FROM challenges WHERE id = ?", (cursor.lastrowid,))
-    result = cursor.fetchone()
+    result = dict(cursor.fetchone())
     conn.close()
 
     return {
@@ -142,7 +146,7 @@ async def resolve_challenge(
 @router.put("/{challenge_id}/reject")
 async def reject_challenge(
     challenge_id: int,
-    reason: str,
+    body: ChallengeReject,
     current_user: User = Depends(require_admin),
 ):
     """
@@ -162,7 +166,7 @@ async def reject_challenge(
 
     return {
         "message": "Challenge rejected",
-        "reason": reason,
+        "reason": body.reason,
         "rejected_by": current_user.email,
     }
 

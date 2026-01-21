@@ -111,6 +111,12 @@ def test_resolve_challenge(client, admin_token):
 
 def test_reject_challenge(client, admin_token):
     """Test rejecting a challenge."""
+    # First sync a transaction
+    client.post(
+        "/api/transactions/sync",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
     challenge_response = client.post(
         "/api/challenges",
         headers={"Authorization": f"Bearer {admin_token}"},

@@ -18,3 +18,4 @@
 ✓ Ready in 1529ms
  GET / 200 in 1190ms (compile: 1126ms, render: 63ms)
  GET /dashboard 200 in 210ms (compile: 166ms, render: 44ms)
+ GET / 200 in 26ms (compile: 9ms, render: 17ms)
