@@ -22,3 +22,9 @@
 ✓ Compiled in 5ms
 ✓ Compiled in 6ms
 ✓ Compiled in 16ms
+⚠ Unsupported metadata viewport is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 75ms (compile: 37ms, render: 38ms)
+⚠ Unsupported metadata viewport is configured in metadata export in /. Please move it to viewport export instead.
+Read more: https://nextjs.org/docs/app/api-reference/functions/generate-viewport
+ GET / 200 in 39ms (compile: 5ms, render: 34ms)
