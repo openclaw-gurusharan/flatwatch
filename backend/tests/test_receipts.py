@@ -6,17 +6,23 @@ from pathlib import Path
 
 from app.main import app
 from app.routers.receipts import UPLOAD_DIR
+from app.database import init_db, get_db_path
 
 
 @pytest.fixture(autouse=True)
 def setup_upload_dir():
-    """Ensure upload directory exists."""
+    """Ensure upload directory exists and database initialized."""
+    init_db()
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     yield
     # Clean up uploaded files
     for file in UPLOAD_DIR.iterdir():
         if file.is_file():
             file.unlink()
+    # Clean up database
+    db_path = get_db_path()
+    if db_path.exists():
+        os.remove(db_path)
 
 
 @pytest.fixture

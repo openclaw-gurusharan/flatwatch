@@ -1,8 +1,20 @@
 # Tests for RBAC functionality
 import pytest
+import os
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.database import init_db, get_db_path
+
+
+@pytest.fixture(autouse=True)
+def setup_database():
+    """Initialize database before each test."""
+    init_db()
+    yield
+    db_path = get_db_path()
+    if db_path.exists():
+        os.remove(db_path)
 
 
 @pytest.fixture

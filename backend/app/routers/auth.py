@@ -1,5 +1,5 @@
 # Authentication router for FlatWatch
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from ..auth import (
@@ -12,13 +12,14 @@ from ..auth import (
     create_user,
     get_current_user,
 )
+from ..audit import AuditAction, log_action
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 security = HTTPBearer()
 
 
 @router.post("/login", response_model=Token)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, req: Request):
     """
     Login endpoint (POC mock).
     In production, this will verify Firebase ID tokens.
@@ -34,11 +35,19 @@ async def login(request: LoginRequest):
         data={"sub": user.email, "role": user.role, "id": user.id}
     )
 
+    # Audit log
+    log_action(
+        AuditAction.LOGIN,
+        user.id,
+        f"User logged in: {user.email}",
+        ip_address=req.client.host if req.client else None,
+    )
+
     return Token(access_token=access_token, user=user)
 
 
 @router.post("/signup", response_model=Token)
-async def signup(request: SignupRequest):
+async def signup(request: SignupRequest, req: Request):
     """
     Signup endpoint (POC mock).
     In production, this will create Firebase user.
@@ -54,6 +63,14 @@ async def signup(request: SignupRequest):
     user = create_user(request.email, request.name, request.flat_number)
     access_token = create_access_token(
         data={"sub": user.email, "role": user.role, "id": user.id}
+    )
+
+    # Audit log
+    log_action(
+        AuditAction.SIGNUP,
+        user.id,
+        f"New user signed up: {user.email}",
+        ip_address=req.client.host if req.client else None,
     )
 
     return Token(access_token=access_token, user=user)

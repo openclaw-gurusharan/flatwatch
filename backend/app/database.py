@@ -15,6 +15,8 @@ def get_db_path() -> Path:
 
 def init_db() -> None:
     """Initialize the database with required tables."""
+    from .audit import init_audit_tables
+
     db_path = get_db_path()
 
     with sqlite3.connect(db_path) as conn:
@@ -65,6 +67,9 @@ def init_db() -> None:
         """)
 
         conn.commit()
+
+    # Initialize audit tables
+    init_audit_tables()
 
 
 @contextmanager
