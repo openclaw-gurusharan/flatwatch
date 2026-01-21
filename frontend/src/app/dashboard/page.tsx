@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { FinancialSummary } from '@/components/dashboard/FinancialSummary';
 import { TransactionList } from '@/components/dashboard/TransactionList';
-import { transactionsApi, healthCheck } from '@/lib/api';
+import { transactionsApi, authApi } from '@/lib/api';
 
 interface Summary {
   balance: number;
@@ -29,28 +29,38 @@ export default function DashboardPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // For POC, use mock auth
-  const mockToken = 'mock_token';
+  const [authToken, setAuthToken] = useState<string | null>(null);
 
   useEffect(() => {
-    loadData();
+    authenticateAndLoadData();
 
     // Refresh every 30 seconds
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  const loadData = async () => {
+  const authenticateAndLoadData = async () => {
+    try {
+      // First login to get real token
+      const authResponse = await authApi.login('admin@flatwatch.test', 'any');
+      setAuthToken(authResponse.access_token);
+      await loadData(authResponse.access_token);
+    } catch (err) {
+      setError('Authentication failed');
+      setLoading(false);
+    }
+  };
+
+  const loadData = async (token: string) => {
     try {
       setError(null);
 
       // Load summary
-      const summaryData = await transactionsApi.getSummary(mockToken);
+      const summaryData = await transactionsApi.getSummary(token);
       setSummary(summaryData);
 
       // Load recent transactions
-      const txns = await transactionsApi.list(mockToken, { limit: 10 });
+      const txns = await transactionsApi.list(token, { limit: 10 });
       setTransactions(txns);
 
       setLoading(false);
@@ -61,9 +71,13 @@ export default function DashboardPage() {
   };
 
   const handleSync = async () => {
+    if (!authToken) {
+      setError('Not authenticated');
+      return;
+    }
     try {
-      await transactionsApi.sync(mockToken);
-      loadData();
+      await transactionsApi.sync(authToken);
+      await loadData(authToken);
     } catch (err) {
       setError('Sync failed');
     }
