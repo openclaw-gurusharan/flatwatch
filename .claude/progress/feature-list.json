@@ -60,7 +60,7 @@
       "id": "F008",
       "description": "Shame Dashboard - Transaction attribution (name/role)",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "tier": "mvp",
       "acceptance": "Each transaction shows who approved it"
     },
