@@ -92,7 +92,7 @@
       "id": "F012",
       "description": "Receipt Snap - Flag levels (Red/Yellow/Green)",
       "priority": 20,
-      "status": "pending",
+      "status": "implemented",
       "tier": "core",
       "acceptance": "Mismatches flagged with appropriate color"
     },
