@@ -12,7 +12,7 @@
       "id": "F002",
       "description": "Project scaffolding - Initialize FastAPI backend with SQLite",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "tier": "mvp",
       "acceptance": "FastAPI server runs, SQLite database created"
     },
