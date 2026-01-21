@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import API_TITLE, API_VERSION
 from .database import init_db, get_db_connection
 from .models import HealthResponse
+from .routers import auth
 
 
 @asynccontextmanager
@@ -34,6 +35,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(auth.router)
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -65,4 +69,5 @@ async def root():
         "message": "FlatWatch API",
         "version": API_VERSION,
         "docs": "/api/docs",
+        "auth": "/api/auth",
     }
