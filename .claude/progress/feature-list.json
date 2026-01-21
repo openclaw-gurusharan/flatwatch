@@ -68,7 +68,7 @@
       "id": "F009",
       "description": "Receipt Snap - Document upload (PDF, images, Excel/CSV)",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "tier": "mvp",
       "acceptance": "Files upload successfully to cloud storage"
     },
