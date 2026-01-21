@@ -108,7 +108,7 @@
       "id": "F014",
       "description": "Chat Guard - Natural language financial queries",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "tier": "mvp",
       "acceptance": "Users can query transactions in plain language"
     },
@@ -116,7 +116,7 @@
       "id": "F015",
       "description": "Chat Guard - Bye-laws knowledge base integration",
       "priority": 20,
-      "status": "pending",
+      "status": "implemented",
       "tier": "core",
       "acceptance": "Responses include compliance references"
     },
