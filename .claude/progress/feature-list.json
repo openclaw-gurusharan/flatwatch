@@ -76,7 +76,7 @@
       "id": "F010",
       "description": "Receipt Snap - OCR integration for receipt data extraction",
       "priority": 10,
-      "status": "pending",
+      "status": "implemented",
       "tier": "mvp",
       "acceptance": "Amount, date, vendor extracted from receipts"
     },
