@@ -2,9 +2,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PageLayout } from '@/components/layout/PageLayout';
 import { FinancialSummary } from '@/components/dashboard/FinancialSummary';
 import { TransactionList } from '@/components/dashboard/TransactionList';
-import { transactionsApi, authApi } from '@/lib/api';
+import { ProtectedRoute } from '@/lib/ProtectedRoute';
+import { transactionsApi, type Transaction } from '@/lib/api';
 
 interface Summary {
   balance: number;
@@ -14,55 +16,23 @@ interface Summary {
   recent_transactions_24h: number;
 }
 
-interface Transaction {
-  id: number;
-  amount: number;
-  transaction_type: 'inflow' | 'outflow';
-  description: string | null;
-  vpa: string | null;
-  timestamp: string;
-  verified: boolean;
-}
-
-export default function DashboardPage() {
+function DashboardContent() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [authToken, setAuthToken] = useState<string | null>(null);
 
   useEffect(() => {
-    authenticateAndLoadData();
-
-    // Refresh every 30 seconds
-    const interval = setInterval(loadData, 30000);
-    return () => clearInterval(interval);
+    loadData();
   }, []);
 
-  const authenticateAndLoadData = async () => {
-    try {
-      // First login to get real token
-      const authResponse = await authApi.login('admin@flatwatch.test', 'any');
-      setAuthToken(authResponse.access_token);
-      await loadData(authResponse.access_token);
-    } catch (err) {
-      setError('Authentication failed');
-      setLoading(false);
-    }
-  };
-
-  const loadData = async (token: string) => {
+  const loadData = async () => {
     try {
       setError(null);
-
-      // Load summary
-      const summaryData = await transactionsApi.getSummary(token);
+      const summaryData = await transactionsApi.getSummary();
       setSummary(summaryData);
-
-      // Load recent transactions
-      const txns = await transactionsApi.list(token, { limit: 10 });
+      const txns = await transactionsApi.list({ limit: 10 });
       setTransactions(txns);
-
       setLoading(false);
     } catch (err) {
       setError('Failed to load data');
@@ -71,13 +41,9 @@ export default function DashboardPage() {
   };
 
   const handleSync = async () => {
-    if (!authToken) {
-      setError('Not authenticated');
-      return;
-    }
     try {
-      await transactionsApi.sync(authToken);
-      await loadData(authToken);
+      await transactionsApi.sync();
+      await loadData();
     } catch (err) {
       setError('Sync failed');
     }
@@ -101,7 +67,7 @@ export default function DashboardPage() {
           <p className="text-[rgb(255,97,26)]">{error}</p>
           <button
             onClick={loadData}
-            className="mt-4 h-12 rounded-full bg-[rgb(255,97,26)] px-6 text font-medium text-white shadow-[0_2px_8px_rgba(255,97,26,0.3)] transition-all hover:shadow-[0_4px_12px_rgba(255,97,26,0.4)]"
+            className="mt-4 inline-flex h-12 items-center justify-center rounded-full bg-[rgb(255,97,26)] px-6 font-medium text-white shadow-[0_2px_8px_rgba(255,97,26,0.3)] transition-all hover:shadow-[0_4px_12px_rgba(255,97,26,0.4)] active:scale-95"
           >
             Retry
           </button>
@@ -111,44 +77,44 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white px-6 py-12">
-      <main className="mx-auto max-w-2xl space-y-12">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-semibold tracking-tight text-[#333]">
-              FlatWatch
-            </h1>
-            <p className="text-lg text-[#999]">Society Cash Tracker</p>
-          </div>
-          <button
-            onClick={handleSync}
-            className="h-10 rounded-full bg-[rgb(238,238,238)] px-4 text-sm font-medium text-[#333] transition-all hover:bg-[rgb(232,232,232)]"
-          >
-            Sync Now
-          </button>
-        </div>
+    <PageLayout title="FlatWatch" description="">
+      {/* Sync Button */}
+      <div className="flex justify-end">
+        <button
+          onClick={handleSync}
+          className="h-10 rounded-full bg-[rgb(238,238,238)] px-4 text-sm font-medium text-[#333] transition-all hover:bg-[rgb(232,232,232)] active:scale-95"
+        >
+          Sync Now
+        </button>
+      </div>
 
-        {/* Financial Summary */}
-        {summary && (
-          <FinancialSummary
-            balance={summary.balance}
-            totalInflow={summary.total_inflow}
-            totalOutflow={summary.total_outflow}
-            unmatched={summary.unmatched_transactions}
-            recent={summary.recent_transactions_24h}
-          />
-        )}
+      {/* Financial Summary */}
+      {summary && (
+        <FinancialSummary
+          balance={summary.balance}
+          totalInflow={summary.total_inflow}
+          totalOutflow={summary.total_outflow}
+          unmatched={summary.unmatched_transactions}
+          recent={summary.recent_transactions_24h}
+        />
+      )}
 
-        {/* Transaction List */}
-        <TransactionList transactions={transactions} />
+      {/* Transaction List */}
+      <TransactionList transactions={transactions} />
 
-        {/* Footer status */}
-        <div className="flex items-center justify-center gap-2 rounded-full bg-[rgb(238,238,238)] px-4 py-2">
-          <span className="h-2 w-2 rounded-full bg-[rgb(76,175,80)]" />
-          <span className="text-sm text-[#999]">System online • Auto-refresh every 30s</span>
-        </div>
-      </main>
-    </div>
+      {/* Footer status */}
+      <div className="flex items-center justify-center gap-2 rounded-full bg-[rgb(238,238,238)] px-4 py-3">
+        <span className="h-2 w-2 rounded-full bg-[rgb(76,175,80)]" />
+        <span className="text-sm text-[#999]">System online</span>
+      </div>
+    </PageLayout>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <ProtectedRoute>
+      <DashboardContent />
+    </ProtectedRoute>
   );
 }

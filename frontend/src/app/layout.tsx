@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Sacramento } from "next/font/google";
 import "./globals.css";
 import { SkipLink } from "@/components/a11y";
+import { AuthProvider } from "@/lib/auth";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,6 +14,13 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const sacramento = Sacramento({
+  variable: "--font-sacramento",
+  subsets: ["latin"],
+  weight: ["400"],
+});
+
+export { sacramento };
 export const metadata: Metadata = {
   title: "FlatWatch - Society Transparency System",
   description: "Financial transparency for housing societies",
@@ -31,12 +39,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} ${sacramento.variable} antialiased`}
       >
-        <SkipLink />
-        <main id="main-content">
-          {children}
-        </main>
+        <AuthProvider>
+          <SkipLink />
+          <main id="main-content">
+            {children}
+          </main>
+        </AuthProvider>
       </body>
     </html>
   );
