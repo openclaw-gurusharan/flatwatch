@@ -8,7 +8,7 @@ import httpx
 from pydantic import BaseModel
 
 from .encryption import encrypt_email, decrypt_email, hash_sensitive_data
-from .config import IDENTITY_URL
+from .config import AADHAAR_CHAIN_URL
 
 # Secret key for JWT (in production, use environment variable)
 SECRET_KEY = "flatwatch-dev-secret-key-change-in-production"
@@ -48,6 +48,7 @@ class SSOUser(BaseModel):
     email: str
     name: Optional[str] = None
     role: str
+    wallet_address: Optional[str] = None
 
 
 class SSOValidationResponse(BaseModel):
@@ -151,7 +152,7 @@ async def validate_sso_session(cookie_value: str) -> SSOValidationResponse:
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{IDENTITY_URL}/api/auth/validate",
+                f"{AADHAAR_CHAIN_URL}/api/auth/validate",
                 headers={"Cookie": cookie_value},
                 timeout=10.0,
             )

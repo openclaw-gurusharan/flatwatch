@@ -15,4 +15,4 @@ API_TITLE = "FlatWatch API"
 API_VERSION = "0.1.0"
 
 # SSO Identity Provider
-IDENTITY_URL = os.getenv("IDENTITY_URL", "https://aadharcha.in")
+AADHAAR_CHAIN_URL = os.getenv("AADHAAR_CHAIN_URL", "https://aadhaar-chain.com")
