@@ -1,73 +1,39 @@
 // API client for FlatWatch backend
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const IDENTITY_URL = process.env.NEXT_PUBLIC_IDENTITY_URL || 'https://aadharcha.in';
-
-// Session validation response
-interface SessionValidation {
-  valid: boolean;
-  user?: {
-    id: string;
-    email: string;
-    name?: string;
-    role: string;
-  };
-}
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8001';
+const AUTH_TOKEN_KEY = 'flatwatch-auth-token';
 
 /**
- * API call wrapper with SSO session validation
- * - Validates session before each call
- * - Auto-redirects to login if unauthenticated
- * - Includes credentials for cookie handling
- * - Adds X-User-ID header when authenticated
+ * API call wrapper with local bearer token auth
  */
 async function apiCall<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  // Validate session first
-  try {
-    const validateResponse = await fetch(`${IDENTITY_URL}/api/auth/validate`, {
-      method: 'GET',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!validateResponse.ok || validateResponse.status === 401) {
-      // Session invalid - redirect to login
-      const returnUrl = encodeURIComponent(window.location.href);
-      window.location.href = `${IDENTITY_URL}/login?return_url=${returnUrl}`;
-      throw new Error('Unauthenticated - redirecting to login');
-    }
-
-    const sessionData: SessionValidation = await validateResponse.json();
-    if (!sessionData.valid || !sessionData.user) {
-      const returnUrl = encodeURIComponent(window.location.href);
-      window.location.href = `${IDENTITY_URL}/login?return_url=${returnUrl}`;
-      throw new Error('Unauthenticated - redirecting to login');
-    }
-
-    // Add X-User-ID header
-    const headers = new Headers(options.headers || {});
-    headers.append('X-User-ID', sessionData.user.id);
-
-    // Make the actual API call with credentials
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      credentials: 'include',
-      headers,
-    });
-
-    if (!response.ok) {
-      throw new Error(`API call failed: ${response.statusText}`);
-    }
-
-    return response.json();
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('redirecting')) {
-      throw error;
-    }
-    throw error;
+  const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
+  if (!token) {
+    window.location.href = '/';
+    throw new Error('Unauthenticated - redirecting to login');
   }
+
+  const headers = new Headers(options.headers || {});
+  headers.set('Authorization', `Bearer ${token}`);
+
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    ...options,
+    headers,
+  });
+
+  if (response.status === 401) {
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.location.href = '/';
+    throw new Error('Unauthenticated - redirecting to login');
+  }
+
+  if (!response.ok) {
+    throw new Error(`API call failed: ${response.statusText}`);
+  }
+
+  return response.json();
 }
 
 export interface Transaction {

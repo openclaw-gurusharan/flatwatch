@@ -1,7 +1,7 @@
 # Challenges router for FlatWatch
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 
 from ..rbac import require_resident, require_admin
@@ -25,7 +25,7 @@ class ChallengeResponse(BaseModel):
     reason: str
     status: str
     created_at: str
-    resolved_at: str | None
+    resolved_at: Optional[str]
 
 
 router = APIRouter(prefix="/api/challenges", tags=["Challenges"])

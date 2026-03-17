@@ -1,0 +1,39 @@
+'use client';
+
+import { useMemo, type ComponentType, type ReactNode } from 'react';
+import { ConnectionProvider, WalletProvider as SolanaWalletProvider } from '@solana/wallet-adapter-react';
+import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
+import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
+import { clusterApiUrl } from '@solana/web3.js';
+import '@solana/wallet-adapter-react-ui/styles.css';
+
+const SafeConnectionProvider = ConnectionProvider as unknown as ComponentType<{
+  endpoint: string;
+  children: ReactNode;
+}>;
+
+const SafeWalletProvider = SolanaWalletProvider as unknown as ComponentType<{
+  wallets: Array<PhantomWalletAdapter | SolflareWalletAdapter>;
+  autoConnect?: boolean;
+  children: ReactNode;
+}>;
+
+const SafeWalletModalProvider = WalletModalProvider as unknown as ComponentType<{
+  children: ReactNode;
+}>;
+
+export function WalletProvider({ children }: { children: ReactNode }) {
+  const endpoint = useMemo(() => clusterApiUrl('devnet'), []);
+  const wallets = useMemo(
+    () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
+    []
+  );
+
+  return (
+    <SafeConnectionProvider endpoint={endpoint}>
+      <SafeWalletProvider wallets={wallets} autoConnect>
+        <SafeWalletModalProvider>{children}</SafeWalletModalProvider>
+      </SafeWalletProvider>
+    </SafeConnectionProvider>
+  );
+}

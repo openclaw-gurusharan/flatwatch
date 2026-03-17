@@ -1,301 +1,154 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useAuth, AuthProvider } from '../auth';
+import { AuthProvider, useAuth } from '../auth';
 
-// Mock fetch
 global.fetch = jest.fn();
 
-// Mock window.location
 const mockLocation = { href: '' };
 Object.defineProperty(window, 'location', {
   value: mockLocation,
   writable: true,
 });
 
-describe('useAuth', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    mockLocation.href = '';
-  });
+const AUTH_TOKEN_KEY = 'flatwatch-auth-token';
 
+describe('flatwatch auth provider', () => {
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <AuthProvider>{children}</AuthProvider>
   );
 
-  describe('validateSession', () => {
-    it('should set user when session is valid', async () => {
-      const mockUser = {
-        id: '123',
-        email: 'test@example.com',
-        name: 'Test User',
+  beforeEach(() => {
+    jest.clearAllMocks();
+    window.localStorage.clear();
+    mockLocation.href = '';
+  });
+
+  it('treats missing local token as signed out', async () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.user).toBeNull();
+    expect(result.current.error).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('verifies an existing token with the local backend', async () => {
+    window.localStorage.setItem(AUTH_TOKEN_KEY, 'demo-token');
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        valid: true,
+        user: {
+          id: 7,
+          email: 'resident@flatwatch.test',
+          name: 'Resident',
+          role: 'resident',
+        },
+      }),
+    });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://127.0.0.1:8001/api/auth/verify',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer demo-token',
+        }),
+      })
+    );
+    expect(result.current.user).toEqual({
+      id: 7,
+      email: 'resident@flatwatch.test',
+      name: 'Resident',
+      role: 'resident',
+    });
+  });
+
+  it('clears an invalid token on 401', async () => {
+    window.localStorage.setItem(AUTH_TOKEN_KEY, 'expired-token');
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+    });
+
+    const { result } = renderHook(() => useAuth(), { wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.user).toBeNull();
+    expect(window.localStorage.getItem(AUTH_TOKEN_KEY)).toBeNull();
+  });
+
+  it('logs in through the local backend and stores the token', async () => {
+    const loginResponse = {
+      access_token: 'fresh-token',
+      token_type: 'bearer',
+      user: {
+        id: 2,
+        email: 'resident@flatwatch.test',
+        name: 'Resident User',
         role: 'resident',
-      };
+      },
+    };
 
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ valid: true, user: mockUser }),
-      });
+    const { result } = renderHook(() => useAuth(), { wrapper });
 
-      const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.user).toEqual(mockUser);
-      expect(result.current.error).toBeNull();
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://aadharcha.in/api/auth/validate',
-        expect.objectContaining({
-          credentials: 'include',
-        })
-      );
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => loginResponse,
     });
 
-    it('should set user to null when session is invalid (401)', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: false,
-        status: 401,
-        statusText: 'Unauthorized',
-      });
-
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.user).toBeNull();
-      expect(result.current.error).toBeNull();
+    await act(async () => {
+      await result.current.login();
     });
 
-    it('should set error when validation fails with non-401 status', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
-      });
-
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.user).toBeNull();
-      expect(result.current.error).toContain('Session validation failed');
-    });
-
-    it('should set error when network request fails', async () => {
-      (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
-
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.user).toBeNull();
-      expect(result.current.error).toBe('Network error');
-    });
-
-    it('should return false when valid response has no user data', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ valid: false }),
-      });
-
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.user).toBeNull();
-    });
-
-    it('should use default IDENTITY_URL when env not set', async () => {
-      // Verify default URL is used (aadharcha.in)
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ valid: false }),
-      });
-
-      renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => {
-        expect(global.fetch).toHaveBeenCalledWith(
-          'https://aadharcha.in/api/auth/validate',
-          expect.any(Object)
-        );
-      });
+    expect(global.fetch).toHaveBeenLastCalledWith(
+      'http://127.0.0.1:8001/api/auth/login',
+      expect.objectContaining({
+        method: 'POST',
+      })
+    );
+    expect(window.localStorage.getItem(AUTH_TOKEN_KEY)).toBe('fresh-token');
+    expect(result.current.user).toEqual({
+      id: '2',
+      email: 'resident@flatwatch.test',
+      name: 'Resident User',
+      role: 'resident',
     });
   });
 
-  describe('login', () => {
-    it('should redirect to SSO login page', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ valid: false }),
-      });
-
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      act(() => {
-        result.current.login();
-      });
-
-      expect(mockLocation.href).toContain('https://aadharcha.in/login');
-      expect(mockLocation.href).toContain('return_url=');
+  it('logs out by clearing the local token and returning home', async () => {
+    window.localStorage.setItem(AUTH_TOKEN_KEY, 'demo-token');
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        valid: true,
+        user: {
+          id: 2,
+          email: 'resident@flatwatch.test',
+          name: 'Resident User',
+          role: 'resident',
+        },
+      }),
     });
 
-    it('should use default identity URL for login redirect', () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ valid: false }),
-      });
+    const { result } = renderHook(() => useAuth(), { wrapper });
 
-      const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.user).not.toBeNull());
 
-      act(() => {
-        result.current.login();
-      });
-
-      expect(mockLocation.href).toContain('https://aadharcha.in/login');
-      expect(mockLocation.href).toContain('return_url=');
-    });
-  });
-
-  describe('logout', () => {
-    it('should call logout API and clear user', async () => {
-      (global.fetch as jest.Mock)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({
-            valid: true,
-            user: { id: '123', email: 'test@example.com', role: 'resident' },
-          }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-        });
-
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => expect(result.current.user).not.toBeNull());
-
-      await act(async () => {
-        await result.current.logout();
-      });
-
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://aadharcha.in/api/auth/logout',
-        expect.objectContaining({
-          method: 'POST',
-          credentials: 'include',
-        })
-      );
-      expect(result.current.user).toBeNull();
-      expect(mockLocation.href).toBe('/');
+    await act(async () => {
+      await result.current.logout();
     });
 
-    it('should handle logout API errors gracefully', async () => {
-      (global.fetch as jest.Mock)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({
-            valid: true,
-            user: { id: '123', email: 'test@example.com', role: 'resident' },
-          }),
-        })
-        .mockRejectedValueOnce(new Error('Logout failed'));
-
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => expect(result.current.user).not.toBeNull());
-
-      await act(async () => {
-        await result.current.logout();
-      });
-
-      expect(result.current.user).toBeNull();
-      expect(mockLocation.href).toBe('/');
-    });
-  });
-
-  describe('AuthProvider', () => {
-    it('should throw error when useAuth is used without provider', () => {
-      const consoleError = jest.spyOn(console, 'error').mockImplementation();
-
-      expect(() => {
-        renderHook(() => useAuth());
-      }).toThrow('useAuth must be used within AuthProvider');
-
-      consoleError.mockRestore();
-    });
-
-    it('should validate session on mount', async () => {
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ valid: false }),
-      });
-
-      renderHook(() => useAuth(), { wrapper });
-
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://aadharcha.in/api/auth/validate',
-        expect.any(Object)
-      );
-    });
-  });
-
-  describe('manual validateSession call', () => {
-    it('should return true for valid session', async () => {
-      const mockUser = {
-        id: '123',
-        email: 'test@example.com',
-        name: 'Test User',
-        role: 'resident',
-      };
-
-      // Mock both the initial mount call and the manual call
-      (global.fetch as jest.Mock)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ valid: false }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ valid: true, user: mockUser }),
-        });
-
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      let isValid = false;
-      await act(async () => {
-        isValid = await result.current.validateSession();
-      });
-
-      expect(isValid).toBe(true);
-      expect(result.current.user).toEqual(mockUser);
-    });
-
-    it('should return false for invalid session', async () => {
-      (global.fetch as jest.Mock)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({ valid: false }),
-        })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-          statusText: 'Unauthorized',
-        });
-
-      const { result } = renderHook(() => useAuth(), { wrapper });
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      let isValid = true;
-      await act(async () => {
-        isValid = await result.current.validateSession();
-      });
-
-      expect(isValid).toBe(false);
-      expect(result.current.user).toBeNull();
-    });
+    expect(window.localStorage.getItem(AUTH_TOKEN_KEY)).toBeNull();
+    expect(result.current.user).toBeNull();
+    expect(mockLocation.href).toBe('/');
   });
 });

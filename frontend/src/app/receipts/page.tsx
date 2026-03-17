@@ -3,11 +3,16 @@
 
 import { useEffect, useState } from 'react';
 import { PageLayout } from '@/components/layout/PageLayout';
+import { TrustPanel } from '@/components/trust/TrustPanel';
 import { ProtectedRoute } from '@/lib/ProtectedRoute';
 import { receiptsApi } from '@/lib/api';
 import type { Receipt } from '@/lib/api';
+import { useTrustState } from '@/lib/useTrustState';
+import { useWallet } from '@solana/wallet-adapter-react';
 
 function ReceiptsContent() {
+  const { publicKey } = useWallet();
+  const trust = useTrustState(publicKey?.toBase58() ?? null);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -24,7 +29,7 @@ function ReceiptsContent() {
       const data = await receiptsApi.list();
       setReceipts(Array.isArray(data) ? data : []);
       setLoading(false);
-    } catch (err) {
+    } catch {
       setError('Failed to load receipts');
       setReceipts([]);
       setLoading(false);
@@ -34,13 +39,17 @@ function ReceiptsContent() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (trust.state !== 'verified') {
+      setError(trust.reason || 'Complete AadhaarChain verification before uploading evidence.');
+      return;
+    }
 
     setUploading(true);
     try {
       await receiptsApi.upload(file);
       setFileInputKey(prev => prev + 1);
       await loadReceipts();
-    } catch (err) {
+    } catch {
       setError('Upload failed');
     } finally {
       setUploading(false);
@@ -48,10 +57,15 @@ function ReceiptsContent() {
   };
 
   const handleProcessOCR = async (filename: string) => {
+    if (trust.state !== 'verified') {
+      setError(trust.reason || 'Complete AadhaarChain verification before processing evidence.');
+      return;
+    }
+
     try {
       await receiptsApi.process(filename);
       await loadReceipts();
-    } catch (err) {
+    } catch {
       setError('OCR processing failed');
     }
   };
@@ -78,6 +92,14 @@ function ReceiptsContent() {
 
   return (
     <PageLayout title="Receipt Snap" description="Upload and verify receipts">
+      <TrustPanel
+        state={trust.state}
+        loading={trust.loading}
+        error={trust.error}
+        reason={trust.reason}
+        actionLabel="Resolve evidence trust in AadhaarChain"
+      />
+
       {/* Error message */}
       {error && (
         <div className="rounded-2xl bg-[rgb(255,243,224)] p-4 text-[rgb(255,97,26)]">
@@ -96,15 +118,23 @@ function ReceiptsContent() {
             type="file"
             accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls,.csv"
             onChange={handleFileUpload}
-            disabled={uploading}
+            disabled={uploading || trust.state !== 'verified'}
             className="hidden"
             id="file-upload"
           />
           <label
             htmlFor="file-upload"
-            className={`flex h-12 w-full cursor-pointer items-center justify-center rounded-full bg-[rgb(255,97,26)] px-6 font-medium text-white shadow-[0_2px_8px_rgba(255,97,26,0.3)] transition-all hover:shadow-[0_4px_12px_rgba(255,97,26,0.4)] active:scale-95 ${uploading ? 'opacity-50' : ''}`}
+            className={`flex h-12 w-full items-center justify-center rounded-full px-6 font-medium text-white transition-all ${
+              uploading || trust.state !== 'verified'
+                ? 'cursor-not-allowed bg-[rgb(238,238,238)] text-[#999]'
+                : 'cursor-pointer bg-[rgb(255,97,26)] shadow-[0_2px_8px_rgba(255,97,26,0.3)] hover:shadow-[0_4px_12px_rgba(255,97,26,0.4)] active:scale-95'
+            }`}
           >
-            {uploading ? 'Uploading...' : 'Choose File to Upload'}
+            {uploading
+              ? 'Uploading...'
+              : trust.state !== 'verified'
+                ? 'Verified trust required to upload'
+                : 'Choose File to Upload'}
           </label>
         </div>
       </div>
@@ -145,9 +175,14 @@ function ReceiptsContent() {
                   {!receipt.extracted_amount && (
                     <button
                       onClick={() => handleProcessOCR(receipt.filename)}
-                      className="flex-shrink-0 h-10 rounded-full bg-[rgb(255,97,26)] px-4 text-sm font-medium text-white shadow-[0_2px_8px_rgba(255,97,26,0.3)] transition-all hover:shadow-[0_4px_12px_rgba(255,97,26,0.4)] active:scale-95"
+                      disabled={trust.state !== 'verified'}
+                      className={`flex-shrink-0 h-10 rounded-full px-4 text-sm font-medium transition-all ${
+                        trust.state !== 'verified'
+                          ? 'cursor-not-allowed bg-[rgb(238,238,238)] text-[#999]'
+                          : 'bg-[rgb(255,97,26)] text-white shadow-[0_2px_8px_rgba(255,97,26,0.3)] hover:shadow-[0_4px_12px_rgba(255,97,26,0.4)] active:scale-95'
+                      }`}
                     >
-                      Process
+                      {trust.state !== 'verified' ? 'Trust required' : 'Process'}
                     </button>
                   )}
                 </div>
