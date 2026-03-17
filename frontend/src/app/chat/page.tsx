@@ -39,7 +39,7 @@ function ChatContent() {
       setError(null);
       const response = await chatApi.query(input);
       setMessages(prev => [...prev, response]);
-    } catch (err) {
+    } catch {
       setError('Failed to get response');
       setMessages(prev => [...prev.slice(0, -1)]);
     } finally {

@@ -18,7 +18,7 @@ from ..auth import (
 from ..audit import AuditAction, log_action
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 @router.post("/login", response_model=Token)
@@ -80,8 +80,13 @@ async def signup(request: SignupRequest, req: Request):
 
 
 @router.get("/me", response_model=User)
-async def get_me(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def get_me(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
     """Get current user from token."""
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
     user = get_current_user(credentials.credentials)
     if not user:
         raise HTTPException(
@@ -92,11 +97,16 @@ async def get_me(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
 
 @router.post("/verify")
-async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
     """
     Verify Firebase token (POC stub).
     In production, this will call Firebase Admin SDK.
     """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
     user = get_current_user(credentials.credentials)
     if not user:
         raise HTTPException(

@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .auth import User, get_current_user
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 class Role(str, Enum):
@@ -50,12 +50,18 @@ async def get_current_user_optional(
 
 async def require_roles(
     *roles: str,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> User:
     """
     Dependency to require specific roles.
     Usage: Depends(partial(require_roles, "admin", "super_admin"))
     """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
     user = get_current_user(credentials.credentials)
     if not user:
         raise HTTPException(
@@ -73,21 +79,21 @@ async def require_roles(
 
 
 async def require_admin(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> User:
     """Require admin or super_admin role."""
     return await require_roles(Role.ADMIN, Role.SUPER_ADMIN, credentials=credentials)
 
 
 async def require_super_admin(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> User:
     """Require super_admin role."""
     return await require_roles(Role.SUPER_ADMIN, credentials=credentials)
 
 
 async def require_resident(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> User:
     """Require any authenticated user (resident or above)."""
     return await require_roles(Role.RESIDENT, Role.ADMIN, Role.SUPER_ADMIN, credentials=credentials)
@@ -150,9 +156,15 @@ def has_permission(user_role: str, permission: str) -> bool:
 
 async def require_permission(
     permission: str,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> User:
     """Dependency to require specific permission."""
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+
     user = get_current_user(credentials.credentials)
     if not user:
         raise HTTPException(

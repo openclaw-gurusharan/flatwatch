@@ -9,10 +9,10 @@ interface Transaction {
   vpa: string | null;
   timestamp: string;
   verified: boolean;
-  entered_by_name: string | null;
-  entered_by_role: string | null;
-  approved_by_name: string | null;
-  approved_by_role: string | null;
+  entered_by_name?: string | null;
+  entered_by_role?: string | null;
+  approved_by_name?: string | null;
+  approved_by_role?: string | null;
 }
 
 interface TransactionListProps {

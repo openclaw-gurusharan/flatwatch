@@ -12,7 +12,7 @@ interface LiveRegionProps {
  * LiveRegion component - Announces dynamic content to screen readers
  * WCAG 2.1 Success Criterion 4.1.3: Status Messages
  */
-export function LiveRegion({ message, role, className = "" }: LiveRegionProps) {
+export function LiveRegion({ message, role }: LiveRegionProps) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
