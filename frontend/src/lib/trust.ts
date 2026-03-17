@@ -32,8 +32,8 @@ export interface TrustSnapshot {
   trust: TrustSurface | null;
 }
 
-const IDENTITY_URL = process.env.NEXT_PUBLIC_IDENTITY_URL || 'https://aadharcha.in';
-const TRUST_API_URL = process.env.NEXT_PUBLIC_TRUST_API_URL || IDENTITY_URL;
+const IDENTITY_WEB_URL = process.env.NEXT_PUBLIC_IDENTITY_WEB_URL || 'http://localhost:3000';
+const TRUST_API_URL = process.env.NEXT_PUBLIC_TRUST_API_URL || 'http://127.0.0.1:8000';
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { credentials: 'include' });
@@ -78,3 +78,5 @@ export async function fetchTrustSnapshot(subjectId: string): Promise<TrustSnapsh
     trust,
   };
 }
+
+export { IDENTITY_WEB_URL, TRUST_API_URL };
