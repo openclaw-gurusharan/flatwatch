@@ -28,7 +28,7 @@ jobs:
       - name: Run backend tests
         run: pytest -q
 
-  frontend-checks:
+  frontend-tests:
     runs-on: ubuntu-latest
     defaults:
       run:

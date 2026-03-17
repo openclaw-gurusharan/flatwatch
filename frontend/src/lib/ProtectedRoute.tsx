@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, ReactNode, useRef } from 'react';
+import { ReactNode } from 'react';
 import { useAuth } from './auth';
 
 interface ProtectedRouteProps {
@@ -8,15 +8,7 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { user, loading, login } = useAuth();
-  const hasAttemptedLogin = useRef(false);
-
-  useEffect(() => {
-    if (!loading && !user && !hasAttemptedLogin.current) {
-      hasAttemptedLogin.current = true;
-      void login();
-    }
-  }, [loading, user, login]);
+  const { user, loading, login, error } = useAuth();
 
   // Show loading while validating session
   if (loading) {
@@ -33,8 +25,19 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   if (!user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-white">
-        <div className="text-center">
-          <p className="text-[#999]">Signing in...</p>
+        <div className="text-center space-y-4">
+          <div className="space-y-2">
+            <p className="text-[#333]">Sign in required</p>
+            <p className="text-[#999]">Use the local development account to access FlatWatch.</p>
+            {error ? <p className="text-sm text-[rgb(255,97,26)]">{error}</p> : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => void login()}
+            className="inline-flex h-12 items-center justify-center rounded-full bg-[rgb(255,97,26)] px-6 font-medium text-white shadow-[0_2px_8px_rgba(255,97,26,0.3)] transition-all hover:shadow-[0_4px_12px_rgba(255,97,26,0.4)] active:scale-95"
+          >
+            Sign in
+          </button>
         </div>
       </div>
     );

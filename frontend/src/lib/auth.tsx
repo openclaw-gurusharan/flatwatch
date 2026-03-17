@@ -4,6 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, R
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8001';
 const AUTH_TOKEN_KEY = 'flatwatch-auth-token';
+const DEV_LOGIN_EMAIL = process.env.NEXT_PUBLIC_DEV_USER_EMAIL || 'resident@flatwatch.test';
+const DEV_LOGIN_PASSWORD = process.env.NEXT_PUBLIC_DEV_USER_PASSWORD || 'dev-local';
 
 export interface User {
   id: string;
@@ -101,8 +103,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: 'resident@flatwatch.test',
-          password: 'dev-local',
+          email: DEV_LOGIN_EMAIL,
+          password: DEV_LOGIN_PASSWORD,
         }),
       });
 
