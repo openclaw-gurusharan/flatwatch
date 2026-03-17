@@ -97,7 +97,8 @@ function ReceiptsContent() {
         loading={trust.loading}
         error={trust.error}
         reason={trust.reason}
-        actionLabel="Resolve evidence trust in AadhaarChain"
+        walletConnected={Boolean(publicKey)}
+        actionLabel={publicKey ? 'Resolve evidence trust in AadhaarChain' : null}
       />
 
       {/* Error message */}

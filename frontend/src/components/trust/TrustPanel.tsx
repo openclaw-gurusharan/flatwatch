@@ -37,13 +37,15 @@ export function TrustPanel({
   loading,
   error,
   reason,
+  walletConnected = true,
   actionLabel = 'Open AadhaarChain',
 }: {
   state: PortfolioTrustState;
   loading?: boolean;
   error?: string | null;
   reason?: string | null;
-  actionLabel?: string;
+  walletConnected?: boolean;
+  actionLabel?: string | null;
 }) {
   if (loading) {
     return (
@@ -55,15 +57,17 @@ export function TrustPanel({
 
   const meta = STATE_META[state];
   const message =
-    error ||
-    reason ||
-    ({
-      no_identity: 'Create an identity anchor in AadhaarChain before using auditable evidence or challenge flows.',
-      identity_present_unverified: 'Complete AadhaarChain verification before uploading evidence or filing high-trust challenges.',
-      manual_review: 'Verification is under manual review. Evidence-backed actions stay paused until review completes.',
-      revoked_or_blocked: 'Trust state is blocked or revoked. Review AadhaarChain before attempting elevated transparency actions.',
-      verified: 'Trust state is verified. Evidence and challenge actions can be attributed to a portable trust record.',
-    }[state]);
+    !walletConnected
+      ? 'Connect the same Solflare wallet you use in AadhaarChain with the wallet button above before using trust-gated evidence or challenge flows.'
+      : error ||
+        reason ||
+        ({
+          no_identity: 'Create an identity anchor in AadhaarChain before using auditable evidence or challenge flows.',
+          identity_present_unverified: 'Complete AadhaarChain verification before uploading evidence or filing high-trust challenges.',
+          manual_review: 'Verification is under manual review. Evidence-backed actions stay paused until review completes.',
+          revoked_or_blocked: 'Trust state is blocked or revoked. Review AadhaarChain before attempting elevated transparency actions.',
+          verified: 'Trust state is verified. Evidence and challenge actions can be attributed to a portable trust record.',
+        }[state]);
 
   return (
     <div
@@ -82,13 +86,15 @@ export function TrustPanel({
         AadhaarChain trust: {meta.label}
       </div>
       <p className="mt-2 text-sm">{message}</p>
-      <a
-        href={`${IDENTITY_URL}/dashboard`}
-        className="mt-3 inline-flex text-sm underline"
-        style={{ color: meta.color }}
-      >
-        {actionLabel}
-      </a>
+      {actionLabel ? (
+        <a
+          href={`${IDENTITY_URL}/dashboard`}
+          className="mt-3 inline-flex text-sm underline"
+          style={{ color: meta.color }}
+        >
+          {actionLabel}
+        </a>
+      ) : null}
     </div>
   );
 }

@@ -94,7 +94,8 @@ function DashboardContent() {
         loading={trust.loading}
         error={trust.error}
         reason={trust.reason}
-        actionLabel="Review trust in AadhaarChain"
+        walletConnected={Boolean(publicKey)}
+        actionLabel={publicKey ? 'Review trust in AadhaarChain' : null}
       />
 
       {/* Sync Button */}
