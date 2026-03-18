@@ -1,8 +1,11 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
 
-const IDENTITY_URL = process.env.NEXT_PUBLIC_IDENTITY_URL || 'https://aadharcha.in';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8001';
+const AUTH_TOKEN_KEY = 'flatwatch-auth-token';
+const DEV_LOGIN_EMAIL = process.env.NEXT_PUBLIC_DEV_USER_EMAIL || 'resident@flatwatch.test';
+const DEV_LOGIN_PASSWORD = process.env.NEXT_PUBLIC_DEV_USER_PASSWORD || 'dev-local';
 
 export interface User {
   id: string;
@@ -16,7 +19,7 @@ interface AuthContextType {
   loading: boolean;
   error: string | null;
   validateSession: () => Promise<boolean>;
-  login: () => void;
+  login: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -39,20 +42,28 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Validate session with SSO provider
-  const validateSession = async (): Promise<boolean> => {
+  const validateSession = useCallback(async (): Promise<boolean> => {
+    const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
+    if (!token) {
+      setUser(null);
+      setError(null);
+      setLoading(false);
+      return false;
+    }
+
     try {
-      const response = await fetch(`${IDENTITY_URL}/api/auth/validate`, {
+      const response = await fetch(`${API_BASE}/api/auth/verify`, {
         method: 'GET',
-        credentials: 'include',
         headers: {
-          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
         },
       });
 
       if (!response.ok) {
         if (response.status === 401) {
+          window.localStorage.removeItem(AUTH_TOKEN_KEY);
           setUser(null);
+          setError(null);
           return false;
         }
         throw new Error(`Session validation failed: ${response.statusText}`);
@@ -81,46 +92,60 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Redirect to SSO login
-  const login = () => {
-    const returnUrl = encodeURIComponent(window.location.href);
-    window.location.href = `${IDENTITY_URL}/login?return_url=${returnUrl}`;
-  };
-
-  // Logout via SSO provider
-  const logout = async () => {
-    try {
-      await fetch(`${IDENTITY_URL}/api/auth/logout`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-    } catch (err) {
-      console.error('Logout error:', err);
-    } finally {
-      setUser(null);
-      // Redirect to home after logout
-      window.location.href = '/';
-    }
-  };
-
-  // Validate session on mount
-  useEffect(() => {
-    validateSession();
   }, []);
 
-  const value: AuthContextType = {
+  const login = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await fetch(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: DEV_LOGIN_EMAIL,
+          password: DEV_LOGIN_PASSWORD,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Login failed');
+      }
+
+      const data = await response.json();
+      window.localStorage.setItem(AUTH_TOKEN_KEY, data.access_token);
+      setUser({
+        id: String(data.user.id),
+        email: data.user.email,
+        name: data.user.name ?? undefined,
+        role: data.user.role,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Login failed');
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    setUser(null);
+    window.location.href = '/';
+  }, []);
+
+  useEffect(() => {
+    void validateSession();
+  }, [validateSession]);
+
+  const value: AuthContextType = useMemo(() => ({
     user,
     loading,
     error,
     validateSession,
     login,
     logout,
-  };
+  }), [user, loading, error, validateSession, login, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -5,8 +5,11 @@ import { useEffect, useState } from 'react';
 import { PageLayout } from '@/components/layout/PageLayout';
 import { FinancialSummary } from '@/components/dashboard/FinancialSummary';
 import { TransactionList } from '@/components/dashboard/TransactionList';
+import { TrustPanel } from '@/components/trust/TrustPanel';
 import { ProtectedRoute } from '@/lib/ProtectedRoute';
 import { transactionsApi, type Transaction } from '@/lib/api';
+import { useTrustState } from '@/lib/useTrustState';
+import { useWallet } from '@solana/wallet-adapter-react';
 
 interface Summary {
   balance: number;
@@ -17,16 +20,14 @@ interface Summary {
 }
 
 function DashboardContent() {
+  const { publicKey } = useWallet();
+  const trust = useTrustState(publicKey?.toBase58() ?? null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  async function loadData() {
     try {
       setError(null);
       const summaryData = await transactionsApi.getSummary();
@@ -34,17 +35,27 @@ function DashboardContent() {
       const txns = await transactionsApi.list({ limit: 10 });
       setTransactions(txns);
       setLoading(false);
-    } catch (err) {
+    } catch {
       setError('Failed to load data');
       setLoading(false);
     }
-  };
+  }
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadData();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
 
   const handleSync = async () => {
     try {
       await transactionsApi.sync();
       await loadData();
-    } catch (err) {
+    } catch {
       setError('Sync failed');
     }
   };
@@ -78,6 +89,15 @@ function DashboardContent() {
 
   return (
     <PageLayout title="FlatWatch" description="">
+      <TrustPanel
+        state={trust.state}
+        loading={trust.loading}
+        error={trust.error}
+        reason={trust.reason}
+        walletConnected={Boolean(publicKey)}
+        actionLabel={publicKey ? 'Review trust in AadhaarChain' : null}
+      />
+
       {/* Sync Button */}
       <div className="flex justify-end">
         <button

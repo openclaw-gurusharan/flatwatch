@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import API_TITLE, API_VERSION
 from .database import init_db, get_db_connection
 from .models import HealthResponse
-from .routers import auth, admin, transactions, receipts, ocr, chat, challenges, audit, scanner, notifications
+from .routers import auth, admin, transactions, receipts, ocr, chat, challenges, audit, scanner, notifications, control_plane
 
 
 @asynccontextmanager
@@ -30,7 +30,16 @@ app = FastAPI(
 # Configure CORS for Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3002",
+        "http://127.0.0.1:3002",
+        "http://localhost:3003",
+        "http://127.0.0.1:3003",
+        "http://localhost:3004",
+        "http://127.0.0.1:3004",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,6 +56,7 @@ app.include_router(challenges.router)
 app.include_router(audit.router)
 app.include_router(scanner.router)
 app.include_router(notifications.router)
+app.include_router(control_plane.router)
 
 
 @app.get("/api/health", response_model=HealthResponse)

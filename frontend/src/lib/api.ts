@@ -1,73 +1,46 @@
 // API client for FlatWatch backend
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const IDENTITY_URL = process.env.NEXT_PUBLIC_IDENTITY_URL || 'https://aadharcha.in';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8001';
+const AUTH_TOKEN_KEY = 'flatwatch-auth-token';
 
-// Session validation response
-interface SessionValidation {
-  valid: boolean;
-  user?: {
-    id: string;
-    email: string;
-    name?: string;
-    role: string;
-  };
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  return window.localStorage.getItem(AUTH_TOKEN_KEY);
 }
 
 /**
- * API call wrapper with SSO session validation
- * - Validates session before each call
- * - Auto-redirects to login if unauthenticated
- * - Includes credentials for cookie handling
- * - Adds X-User-ID header when authenticated
+ * API call wrapper with local bearer token auth
  */
 async function apiCall<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  // Validate session first
-  try {
-    const validateResponse = await fetch(`${IDENTITY_URL}/api/auth/validate`, {
-      method: 'GET',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!validateResponse.ok || validateResponse.status === 401) {
-      // Session invalid - redirect to login
-      const returnUrl = encodeURIComponent(window.location.href);
-      window.location.href = `${IDENTITY_URL}/login?return_url=${returnUrl}`;
-      throw new Error('Unauthenticated - redirecting to login');
-    }
-
-    const sessionData: SessionValidation = await validateResponse.json();
-    if (!sessionData.valid || !sessionData.user) {
-      const returnUrl = encodeURIComponent(window.location.href);
-      window.location.href = `${IDENTITY_URL}/login?return_url=${returnUrl}`;
-      throw new Error('Unauthenticated - redirecting to login');
-    }
-
-    // Add X-User-ID header
-    const headers = new Headers(options.headers || {});
-    headers.append('X-User-ID', sessionData.user.id);
-
-    // Make the actual API call with credentials
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      credentials: 'include',
-      headers,
-    });
-
-    if (!response.ok) {
-      throw new Error(`API call failed: ${response.statusText}`);
-    }
-
-    return response.json();
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('redirecting')) {
-      throw error;
-    }
-    throw error;
+  const token = getAuthToken();
+  if (!token) {
+    window.location.href = '/';
+    throw new Error('Unauthenticated - redirecting to login');
   }
+
+  const headers = new Headers(options.headers || {});
+  headers.set('Authorization', `Bearer ${token}`);
+
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    ...options,
+    headers,
+  });
+
+  if (response.status === 401) {
+    window.localStorage.removeItem(AUTH_TOKEN_KEY);
+    window.location.href = '/';
+    throw new Error('Unauthenticated - redirecting to login');
+  }
+
+  if (!response.ok) {
+    throw new Error(`API call failed: ${response.statusText}`);
+  }
+
+  return response.json();
 }
 
 export interface Transaction {
@@ -169,6 +142,8 @@ export const healthCheck = async (): Promise<{ status: string; database: string;
 export interface Receipt {
   filename: string;
   upload_date: string;
+  original_filename?: string;
+  size?: number;
   extracted_amount?: number;
   extracted_date?: string;
   extracted_vendor?: string;
@@ -176,25 +151,90 @@ export interface Receipt {
   match_status?: 'matched' | 'partial' | 'unmatched';
 }
 
+interface ReceiptUploadResponse {
+  message: string;
+  filename: string;
+  original_filename?: string;
+  path: string;
+  transaction_id: number | null;
+}
+
+interface ReceiptListResponse {
+  files: Array<{
+    filename: string;
+    size: number;
+    uploaded_at: number;
+  }>;
+}
+
+interface ReceiptProcessResponse {
+  message: string;
+  receipt: string;
+  extracted?: {
+    amount?: number;
+    date?: string;
+    vendor?: string;
+  };
+  matched_transaction?: {
+    id?: number;
+  } | null;
+  flag_level?: 'green' | 'yellow' | 'red';
+}
+
+function toReceiptFromUpload(payload: ReceiptUploadResponse): Receipt {
+  return {
+    filename: payload.filename,
+    original_filename: payload.original_filename,
+    upload_date: new Date().toISOString(),
+  };
+}
+
+function toReceiptList(payload: ReceiptListResponse): Receipt[] {
+  return payload.files.map((file) => ({
+    filename: file.filename,
+    upload_date: new Date(file.uploaded_at * 1000).toISOString(),
+    size: file.size,
+  }));
+}
+
+function toReceiptFromProcess(payload: ReceiptProcessResponse): Receipt {
+  const flag = payload.flag_level;
+
+  return {
+    filename: payload.receipt,
+    upload_date: new Date().toISOString(),
+    extracted_amount: payload.extracted?.amount,
+    extracted_date: payload.extracted?.date,
+    extracted_vendor: payload.extracted?.vendor,
+    matched_transaction_id: payload.matched_transaction?.id,
+    match_status: flag === 'green' ? 'matched' : flag === 'yellow' ? 'partial' : 'unmatched',
+  };
+}
+
 export const receiptsApi = {
   upload: async (file: File): Promise<Receipt> => {
     const formData = new FormData();
     formData.append('file', file);
 
-    return apiCall<Receipt>('/api/receipts/upload', {
+    const response = await apiCall<ReceiptUploadResponse>('/api/receipts/upload', {
       method: 'POST',
       body: formData,
     });
+
+    return toReceiptFromUpload(response);
   },
 
   list: async (): Promise<Receipt[]> => {
-    return apiCall<Receipt[]>('/api/receipts/list');
+    const response = await apiCall<ReceiptListResponse>('/api/receipts/list');
+    return toReceiptList(response);
   },
 
   process: async (filename: string): Promise<Receipt> => {
-    return apiCall<Receipt>(`/api/ocr/process/${filename}`, {
+    const response = await apiCall<ReceiptProcessResponse>(`/api/ocr/process/${filename}`, {
       method: 'POST',
     });
+
+    return toReceiptFromProcess(response);
   },
 };
 
@@ -205,13 +245,163 @@ export interface ChatMessage {
   sources?: string[];
 }
 
+interface ChatQueryResponse {
+  query: string;
+  response: string;
+  session_id?: string;
+  timestamp?: string;
+  sources?: string[];
+}
+
+export type AgentAuthMode = 'api_key' | 'local_cli' | 'bedrock' | 'vertex' | 'azure' | 'unavailable';
+export type PortfolioTrustState =
+  | 'no_identity'
+  | 'identity_present_unverified'
+  | 'verified'
+  | 'manual_review'
+  | 'revoked_or_blocked';
+
+export interface UsageSnapshot {
+  requests_used: number;
+  requests_limit: number;
+  period_start: string;
+  period_end: string;
+  estimated_cost_usd: number;
+}
+
+export interface AgentRuntimeSnapshot {
+  app_id: 'flatwatch' | 'ondc-buyer' | 'ondc-seller';
+  auth_mode: AgentAuthMode;
+  model: string;
+  runtime_available: boolean;
+  agent_access: boolean;
+  trust_state: PortfolioTrustState;
+  trust_required_for_write: boolean;
+  mode: 'blocked' | 'read_only' | 'full';
+  usage: UsageSnapshot;
+  allowed_capabilities: string[];
+  blocked_reason: string | null;
+}
+
+export interface AgentSessionSummary {
+  app_id: 'flatwatch' | 'ondc-buyer' | 'ondc-seller';
+  session_id: string;
+  sdk_session_id: string | null;
+  subject_id: string;
+  trust_state: PortfolioTrustState;
+  mode: 'blocked' | 'read_only' | 'full';
+  allowed_capabilities: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export type AgentStreamEvent =
+  | { type: 'init'; session_id: string; sdk_session_id: string | null; mode: AgentSessionSummary['mode'] }
+  | { type: 'assistant_delta'; content: string; timestamp: number }
+  | { type: 'tool_call'; tool: string; status?: string; timestamp: number }
+  | { type: 'tool_result'; tool: string; status?: string; content?: string; timestamp: number }
+  | { type: 'result'; content: string; timestamp: number; sdk_session_id?: string | null; estimated_cost_usd?: number }
+  | { type: 'error'; error: string; timestamp: number }
+  | { type: 'usage'; usage: UsageSnapshot; timestamp: number };
+
+async function streamEventSource(
+  endpoint: string,
+  options: RequestInit,
+  onEvent: (event: AgentStreamEvent) => void
+) {
+  const response = await fetch(`${API_BASE}${endpoint}`, options);
+  if (!response.ok) {
+    throw new Error(`API call failed: ${response.statusText}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('No response body');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.replace(/^data:\s*/, '').trim();
+      if (!data || data === '[DONE]') continue;
+      onEvent(JSON.parse(data) as AgentStreamEvent);
+    }
+  }
+}
+
 export const chatApi = {
   query: async (query: string): Promise<ChatMessage> => {
-    return apiCall<ChatMessage>('/api/chat/query', {
+    const response = await apiCall<ChatQueryResponse>('/api/chat/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query }),
     });
+
+    return {
+      role: 'assistant',
+      content: response.response ?? (response as unknown as ChatMessage).content,
+      sources: response.sources ?? (response as unknown as ChatMessage).sources,
+    };
+  },
+};
+
+export const agentApi = {
+  getRuntime: async (appId: 'flatwatch' | 'ondc-buyer' | 'ondc-seller', walletAddress?: string | null) => {
+    return apiCall<AgentRuntimeSnapshot>(`/api/agent/runtime?app=${appId}`, {
+      headers: walletAddress ? { 'X-Wallet-Address': walletAddress } : undefined,
+    });
+  },
+
+  createSession: async (
+    appId: 'flatwatch' | 'ondc-buyer' | 'ondc-seller',
+    payload: { task_type: string; context: Record<string, unknown>; resume_session_id?: string },
+    walletAddress?: string | null
+  ) => {
+    return apiCall<AgentSessionSummary>(`/api/agent/${appId}/sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  streamMessage: async (
+    appId: 'flatwatch' | 'ondc-buyer' | 'ondc-seller',
+    payload: { session_id: string; message: string },
+    onEvent: (event: AgentStreamEvent) => void,
+    walletAddress?: string | null
+  ) => {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error('Unauthenticated - redirecting to login');
+    }
+    await streamEventSource(
+      `/api/agent/${appId}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          ...(walletAddress ? { 'X-Wallet-Address': walletAddress } : {}),
+        },
+        body: JSON.stringify(payload),
+      },
+      onEvent,
+    );
   },
 };
 

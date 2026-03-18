@@ -3,11 +3,18 @@
 
 import { useEffect, useState } from 'react';
 import { PageLayout } from '@/components/layout/PageLayout';
+import { TrustPanel } from '@/components/trust/TrustPanel';
 import { ProtectedRoute } from '@/lib/ProtectedRoute';
+import { useAuth } from '@/lib/auth';
 import { challengesApi, transactionsApi } from '@/lib/api';
 import type { Challenge, Transaction } from '@/lib/api';
+import { useTrustState } from '@/lib/useTrustState';
+import { useWallet } from '@solana/wallet-adapter-react';
 
 function ChallengesContent() {
+  const { user } = useAuth();
+  const { publicKey } = useWallet();
+  const trust = useTrustState(publicKey?.toBase58() ?? null);
   const [challenges, setChallenges] = useState<Challenge[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,6 +23,7 @@ function ChallengesContent() {
   const [selectedTxnId, setSelectedTxnId] = useState<number | null>(null);
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const canResolveChallenges = user?.role === 'admin' || user?.role === 'super_admin';
 
   useEffect(() => {
     loadData();
@@ -30,7 +38,7 @@ function ChallengesContent() {
       ]);
       setChallenges(Array.isArray(challengesData) ? challengesData : []);
       setTransactions(Array.isArray(transactionsData) ? transactionsData : []);
-    } catch (err) {
+    } catch {
       setError('Failed to load data');
       setChallenges([]);
       setTransactions([]);
@@ -41,6 +49,10 @@ function ChallengesContent() {
 
   const handleCreateChallenge = async () => {
     if (!selectedTxnId || !reason.trim() || submitting) return;
+    if (trust.state !== 'verified') {
+      setError(trust.reason || 'Complete AadhaarChain verification before filing a challenge.');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -49,7 +61,7 @@ function ChallengesContent() {
       setSelectedTxnId(null);
       setReason('');
       await loadData();
-    } catch (err) {
+    } catch {
       setError('Failed to create challenge');
     } finally {
       setSubmitting(false);
@@ -57,14 +69,19 @@ function ChallengesContent() {
   };
 
   const handleResolve = async (challengeId: number) => {
+    if (trust.state !== 'verified') {
+      setError(trust.reason || 'Complete AadhaarChain verification before resolving a challenge.');
+      return;
+    }
+
     const evidence = prompt('Enter evidence URL:');
     if (!evidence) return;
 
     try {
       await challengesApi.resolve(challengeId, evidence);
       await loadData();
-    } catch (err) {
-      setError('Failed to resolve challenge');
+    } catch {
+      setError(canResolveChallenges ? 'Failed to resolve challenge' : 'Only admins can resolve challenges.');
     }
   };
 
@@ -94,6 +111,15 @@ function ChallengesContent() {
 
   return (
     <PageLayout title="Challenge Mode" description="Dispute suspicious transactions">
+      <TrustPanel
+        state={trust.state}
+        loading={trust.loading}
+        error={trust.error}
+        reason={trust.reason}
+        walletConnected={Boolean(publicKey)}
+        actionLabel={publicKey ? 'Resolve challenge trust in AadhaarChain' : null}
+      />
+
       {/* Error message */}
       {error && (
         <div style={{ marginBottom: '24px', borderRadius: '16px', backgroundColor: 'rgb(255,243,224)', padding: '16px', color: 'rgb(255,97,26)' }}>
@@ -105,23 +131,32 @@ function ChallengesContent() {
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '32px' }}>
         <button
           onClick={() => setShowNewForm(!showNewForm)}
+          disabled={trust.state !== 'verified'}
           style={{
             height: '48px',
             borderRadius: '999px',
-            backgroundColor: 'rgb(255,97,26)',
+            backgroundColor: trust.state === 'verified' ? 'rgb(255,97,26)' : 'rgb(238,238,238)',
             padding: '0 24px',
             fontSize: '14px',
             fontWeight: 500,
-            color: 'white',
+            color: trust.state === 'verified' ? 'white' : '#999',
             border: 'none',
-            boxShadow: '0 2px 8px rgba(255,97,26,0.3)',
+            boxShadow: trust.state === 'verified' ? '0 2px 8px rgba(255,97,26,0.3)' : 'none',
             transition: 'all 0.2s',
-            cursor: 'pointer'
+            cursor: trust.state === 'verified' ? 'pointer' : 'not-allowed'
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(255,97,26,0.4)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(255,97,26,0.3)'; }}
+          onMouseEnter={(e) => {
+            if (trust.state === 'verified') {
+              e.currentTarget.style.boxShadow = '0 4px 12px rgba(255,97,26,0.4)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (trust.state === 'verified') {
+              e.currentTarget.style.boxShadow = '0 2px 8px rgba(255,97,26,0.3)';
+            }
+          }}
         >
-          {showNewForm ? 'Cancel' : 'New Challenge'}
+          {trust.state === 'verified' ? (showNewForm ? 'Cancel' : 'New Challenge') : 'Verified trust required'}
         </button>
       </div>
 
@@ -186,32 +221,36 @@ function ChallengesContent() {
 
             <button
               onClick={handleCreateChallenge}
-              disabled={!selectedTxnId || !reason.trim() || submitting}
+              disabled={trust.state !== 'verified' || !selectedTxnId || !reason.trim() || submitting}
               style={{
                 width: '100%',
                 height: '48px',
                 borderRadius: '999px',
                 fontSize: '14px',
                 fontWeight: 500,
-                color: 'white',
+                color: trust.state === 'verified' && selectedTxnId && reason.trim() && !submitting ? 'white' : '#999',
                 border: 'none',
-                backgroundColor: (selectedTxnId && reason.trim() && !submitting) ? 'rgb(255,97,26)' : 'rgb(238,238,238)',
-                boxShadow: (selectedTxnId && reason.trim() && !submitting) ? '0 2px 8px rgba(255,97,26,0.3)' : 'none',
-                cursor: (selectedTxnId && reason.trim() && !submitting) ? 'pointer' : 'not-allowed',
+                backgroundColor: (trust.state === 'verified' && selectedTxnId && reason.trim() && !submitting) ? 'rgb(255,97,26)' : 'rgb(238,238,238)',
+                boxShadow: (trust.state === 'verified' && selectedTxnId && reason.trim() && !submitting) ? '0 2px 8px rgba(255,97,26,0.3)' : 'none',
+                cursor: (trust.state === 'verified' && selectedTxnId && reason.trim() && !submitting) ? 'pointer' : 'not-allowed',
                 transition: 'all 0.2s'
               }}
               onMouseEnter={(e) => {
-                if (selectedTxnId && reason.trim() && !submitting) {
+                if (trust.state === 'verified' && selectedTxnId && reason.trim() && !submitting) {
                   e.currentTarget.style.boxShadow = '0 4px 12px rgba(255,97,26,0.4)';
                 }
               }}
               onMouseLeave={(e) => {
-                if (selectedTxnId && reason.trim() && !submitting) {
+                if (trust.state === 'verified' && selectedTxnId && reason.trim() && !submitting) {
                   e.currentTarget.style.boxShadow = '0 2px 8px rgba(255,97,26,0.3)';
                 }
               }}
             >
-              {submitting ? 'Submitting...' : 'Submit Challenge'}
+              {trust.state !== 'verified'
+                ? 'Verified trust required'
+                : submitting
+                  ? 'Submitting...'
+                  : 'Submit Challenge'}
             </button>
           </div>
         </div>
@@ -313,27 +352,36 @@ function ChallengesContent() {
                       )}
                     </div>
 
-                    {isPending && (
+                    {isPending && canResolveChallenges && (
                       <button
                         onClick={() => handleResolve(challenge.id)}
+                        disabled={trust.state !== 'verified'}
                         style={{
                           flexShrink: 0,
                           height: '40px',
                           borderRadius: '999px',
-                          backgroundColor: 'rgb(76,175,80)',
+                          backgroundColor: trust.state === 'verified' ? 'rgb(76,175,80)' : 'rgb(238,238,238)',
                           padding: '0 16px',
                           fontSize: '14px',
                           fontWeight: 500,
-                          color: 'white',
+                          color: trust.state === 'verified' ? 'white' : '#999',
                           border: 'none',
-                          boxShadow: '0 2px 8px rgba(76,175,80,0.3)',
+                          boxShadow: trust.state === 'verified' ? '0 2px 8px rgba(76,175,80,0.3)' : 'none',
                           transition: 'all 0.2s',
-                          cursor: 'pointer'
+                          cursor: trust.state === 'verified' ? 'pointer' : 'not-allowed'
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(76,175,80,0.4)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(76,175,80,0.3)'; }}
+                        onMouseEnter={(e) => {
+                          if (trust.state === 'verified') {
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(76,175,80,0.4)';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (trust.state === 'verified') {
+                            e.currentTarget.style.boxShadow = '0 2px 8px rgba(76,175,80,0.3)';
+                          }
+                        }}
                       >
-                        Resolve
+                        {trust.state === 'verified' ? 'Resolve' : 'Trust required'}
                       </button>
                     )}
                   </div>

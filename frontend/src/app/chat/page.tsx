@@ -1,231 +1,334 @@
-// Chat Guard - AI-powered financial query interface
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUp, Sparkles } from 'lucide-react';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { Alert, Badge, Button, Card, ChatLayout, Textarea } from '@/lib/portfolio-ui';
 import { PageLayout } from '@/components/layout/PageLayout';
 import { ProtectedRoute } from '@/lib/ProtectedRoute';
-import { chatApi } from '@/lib/api';
-import type { ChatMessage } from '@/lib/api';
+import { agentApi, type AgentRuntimeSnapshot, type AgentSessionSummary, type UsageSnapshot } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
+import { useTrustState } from '@/lib/useTrustState';
+
+const STORAGE_KEY = 'flatwatch-agent-session-id';
+
+interface RenderMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
+const DEFAULT_RUNTIME: AgentRuntimeSnapshot = {
+  app_id: 'flatwatch',
+  auth_mode: 'unavailable',
+  model: 'claude-haiku-4-5-20251001',
+  runtime_available: false,
+  agent_access: false,
+  trust_state: 'no_identity',
+  trust_required_for_write: true,
+  mode: 'blocked',
+  usage: {
+    requests_used: 0,
+    requests_limit: 0,
+    period_start: '',
+    period_end: '',
+    estimated_cost_usd: 0,
+  },
+  allowed_capabilities: [],
+  blocked_reason: 'Authentication required.',
+};
+
+function getStoredSessionId() {
+  if (typeof window === 'undefined') {
+    return '';
+  }
+  return window.localStorage.getItem(STORAGE_KEY) ?? '';
+}
+
+function setStoredSessionId(sessionId: string) {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(STORAGE_KEY, sessionId);
+  }
+}
+
+function UsageBadge({ usage }: { usage: UsageSnapshot }) {
+  return (
+    <Badge tone="info">
+      {usage.requests_limit > 0
+        ? `Usage ${usage.requests_used}/${usage.requests_limit}`
+        : `${usage.requests_used} requests this period`}
+    </Badge>
+  );
+}
 
 function ChatContent() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const { user } = useAuth();
+  const { publicKey } = useWallet();
+  const walletAddress = publicKey?.toBase58() ?? null;
+  const trust = useTrustState(walletAddress);
+  const [messages, setMessages] = useState<RenderMessage[]>([]);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [streamingText, setStreamingText] = useState('');
+  const [runtime, setRuntime] = useState<AgentRuntimeSnapshot>(DEFAULT_RUNTIME);
+  const [runtimeLoading, setRuntimeLoading] = useState(false);
+  const [session, setSession] = useState<AgentSessionSummary | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setLoading(false);
-  }, []);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, streamingText, sending]);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    if (!user) {
+      setRuntime(DEFAULT_RUNTIME);
+      setSession(null);
+      return;
+    }
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+    let cancelled = false;
+    const run = async () => {
+      try {
+        setRuntimeLoading(true);
+        setError(null);
+        const next = await agentApi.getRuntime('flatwatch', walletAddress);
+        if (!cancelled) {
+          setRuntime(next);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setRuntime(DEFAULT_RUNTIME);
+          setError(err instanceof Error ? err.message : 'Failed to load agent runtime.');
+        }
+      } finally {
+        if (!cancelled) {
+          setRuntimeLoading(false);
+        }
+      }
+    };
 
-  const handleSend = async () => {
-    if (!input.trim() || sending) return;
+    void run();
 
-    const userMessage: ChatMessage = { role: 'user', content: input };
-    setMessages(prev => [...prev, userMessage]);
+    return () => {
+      cancelled = true;
+    };
+  }, [user, walletAddress]);
+
+  const handleSend = async (nextInput = input) => {
+    const message = nextInput.trim();
+    if (!message || sending || !user || !runtime.agent_access) {
+      return;
+    }
+
+    setError(null);
     setInput('');
     setSending(true);
+    setMessages((current) => [...current, { role: 'user', content: message }]);
 
     try {
-      setError(null);
-      const response = await chatApi.query(input);
-      setMessages(prev => [...prev, response]);
+      const currentSession =
+        session ??
+        (await agentApi.createSession(
+          'flatwatch',
+          {
+            task_type: 'trust_audit_assistant',
+            context: { trust_state: trust.state, wallet_address: walletAddress },
+            resume_session_id: getStoredSessionId() || undefined,
+          },
+          walletAddress,
+        ));
+
+      if (!session) {
+        setSession(currentSession);
+        setStoredSessionId(currentSession.session_id);
+      }
+
+      let finalResponse = '';
+      let latestUsage = runtime.usage;
+
+      await agentApi.streamMessage(
+        'flatwatch',
+        { session_id: currentSession.session_id, message },
+        (event) => {
+          if (event.type === 'assistant_delta') {
+            setStreamingText((current) => current + event.content);
+          }
+          if (event.type === 'result') {
+            finalResponse = event.content;
+          }
+          if (event.type === 'usage') {
+            latestUsage = event.usage;
+          }
+          if (event.type === 'error') {
+            setError(event.error);
+          }
+        },
+        walletAddress,
+      );
+
+      if (finalResponse) {
+        setMessages((current) => [...current, { role: 'assistant', content: finalResponse }]);
+      }
+      setRuntime((current) => ({
+        ...current,
+        usage: latestUsage,
+      }));
     } catch (err) {
-      setError('Failed to get response');
-      setMessages(prev => [...prev.slice(0, -1)]);
+      setError(err instanceof Error ? err.message : 'Failed to send message.');
     } finally {
+      setStreamingText('');
       setSending(false);
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  const suggestedQueries = [
-    'Show me all water bills from last month',
-    'What is the total maintenance collected?',
-    'List all unverified transactions above ₹5000',
-    'Who approved the latest expense?',
-  ];
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-white">
-        <div className="flex items-center gap-2">
-          <span className="h-3 w-3 animate-pulse rounded-full bg-[rgb(255,97,26)]" />
-          <span className="text-[#999]">Loading...</span>
-        </div>
-      </div>
-    );
-  }
+  const suggestedQueries = useMemo(
+    () => [
+      'Summarize this month’s inflows and outflows.',
+      'Which receipts still need review?',
+      'Show the latest resident challenges and likely next actions.',
+      'Explain the by-law basis for disputed maintenance charges.',
+    ],
+    [],
+  );
 
   return (
-    <PageLayout title="Chat Guard" description="AI-powered financial queries">
-      {/* Error message */}
-      {error && (
-        <div style={{ marginBottom: '24px', borderRadius: '16px', backgroundColor: 'rgb(255,243,224)', padding: '16px', color: 'rgb(255,97,26)' }}>
-          {error}
+    <PageLayout title="Chat Guard" description="Claude-powered financial summaries, evidence review, and trust-aware guidance">
+      <div className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          <Badge tone={runtime.runtime_available ? 'success' : 'warning'}>Runtime {runtime.auth_mode}</Badge>
+          <Badge tone={trust.state === 'verified' ? 'success' : 'warning'}>
+            {trust.state === 'verified' ? 'Verified write path enabled' : 'Read-only trust mode'}
+          </Badge>
+          <Badge tone="info">{runtime.model}</Badge>
+          <UsageBadge usage={runtime.usage} />
         </div>
-      )}
 
-      {/* Welcome message when no messages */}
-      {messages.length === 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '32px', alignItems: 'center', textAlign: 'center' }}>
-          <div>
-            <h2 style={{ fontSize: '24px', fontWeight: 500, color: '#333', marginBottom: '8px' }}>How can I help you today?</h2>
-            <p style={{ color: '#999' }}>Ask anything about your society finances</p>
-          </div>
+        {error ? <Alert title="Agent request failed" description={error} tone="error" /> : null}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', width: '100%' }}>
-            {suggestedQueries.map((query, i) => (
-              <button
-                key={i}
-                onClick={() => setInput(query)}
-                style={{
-                  borderRadius: '16px',
-                  border: '1px solid rgb(238,238,238)',
-                  backgroundColor: 'white',
-                  padding: '16px',
-                  textAlign: 'left',
-                  fontSize: '14px',
-                  color: '#333',
-                  transition: 'all 0.2s',
-                  cursor: 'pointer'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'rgb(255,97,26)';
-                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(255,97,26,0.1)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'rgb(238,238,238)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}
-              >
-                {query}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Messages */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}
-          >
-            <div
-              style={{
-                maxWidth: '80%',
-                borderRadius: '24px',
-                padding: '16px 20px',
-                backgroundColor: msg.role === 'user' ? 'rgb(255,97,26)' : 'rgb(238,238,238)',
-                color: msg.role === 'user' ? 'white' : '#333'
-              }}
-            >
-              <p style={{ whiteSpace: 'pre-wrap', fontSize: '14px', lineHeight: 1.5, margin: 0 }}>{msg.content}</p>
-              {msg.sources && msg.sources.length > 0 && (
-                <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(0,0,0,0.1)' }}>
-                  <p style={{ fontSize: '12px', opacity: 0.7, margin: 0 }}>Sources: {msg.sources.join(', ')}</p>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        {sending && (
-          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-            <div style={{ borderRadius: '24px', backgroundColor: 'rgb(238,238,238)', padding: '16px 20px' }}>
-              <div style={{ display: 'flex', gap: '4px' }}>
-                <span className="h-2 w-2 animate-bounce rounded-full bg-[#999]" style={{ animationDelay: '0ms' }} />
-                <span className="h-2 w-2 animate-bounce rounded-full bg-[#999]" style={{ animationDelay: '150ms' }} />
-                <span className="h-2 w-2 animate-bounce rounded-full bg-[#999]" style={{ animationDelay: '300ms' }} />
-              </div>
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input area */}
-      <div style={{
-        position: 'sticky',
-        bottom: 0,
-        backgroundColor: 'white',
-        borderTop: '1px solid rgb(238,238,238)',
-        padding: '16px 0',
-        marginTop: '32px'
-      }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'flex-end',
-          gap: '12px',
-          borderRadius: '999px',
-          border: '2px solid rgb(238,238,238)',
-          backgroundColor: 'rgb(249,249,249)',
-          padding: '8px',
-          transition: 'all 0.2s'
-        }}>
-          <textarea
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask about transactions, balances, compliance..."
-            disabled={sending}
-            rows={1}
-            style={{
-              flex: 1,
-              resize: 'none',
-              border: 'none',
-              backgroundColor: 'transparent',
-              padding: '8px 16px',
-              fontSize: '14px',
-              color: '#333',
-              outline: 'none',
-              minHeight: '40px',
-              maxHeight: '120px'
-            }}
+        {!runtime.runtime_available && user ? (
+          <Alert
+            title="Claude runtime unavailable"
+            description={runtime.blocked_reason ?? 'Configure supported Claude Agent SDK auth or use the local Claude CLI dev adapter on localhost.'}
+            tone="warning"
           />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || sending}
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '50%',
-              border: 'none',
-              backgroundColor: input.trim() && !sending ? 'rgb(255,97,26)' : 'rgb(238,238,238)',
-              color: input.trim() && !sending ? 'white' : '#999',
-              boxShadow: input.trim() && !sending ? '0 2px 8px rgba(255,97,26,0.3)' : 'none',
-              cursor: input.trim() && !sending ? 'pointer' : 'not-allowed',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.2s'
-            }}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          </button>
-        </div>
-        <p style={{ marginTop: '8px', textAlign: 'center', fontSize: '12px', color: '#999' }}>
-          Chat Guard uses AI to answer questions. Verify important information independently.
-        </p>
+        ) : null}
+
+        {runtime.agent_access && trust.state !== 'verified' ? (
+          <Alert
+            title="Trust verification limits write actions"
+            description={trust.reason ?? 'You can use informational agent flows, but evidence-affecting actions stay read-only until AadhaarChain verification completes.'}
+            tone="info"
+          />
+        ) : null}
+
+        {messages.length === 0 ? (
+          <Card className="space-y-6 p-8 text-center">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[rgba(234,106,42,0.12)] text-[var(--ui-primary)]">
+              <Sparkles className="h-6 w-6" />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-3xl font-bold tracking-[-0.04em] text-[var(--ui-text)]">How can I help you today?</h2>
+              <p className="text-sm text-[var(--ui-text-secondary)]">
+                Ask about receipts, transactions, anomalies, and challenge evidence.
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-3">
+              {suggestedQueries.map((query) => (
+                <Button
+                  key={query}
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void handleSend(query)}
+                  disabled={!runtime.agent_access || sending || runtimeLoading}
+                >
+                  {query}
+                </Button>
+              ))}
+            </div>
+          </Card>
+        ) : null}
+
+        <ChatLayout
+          title="FlatWatch Agent"
+          height="640px"
+          actions={session ? <Badge tone="info">Session: {session.session_id.slice(0, 8)}</Badge> : null}
+          footer={
+            <div className="space-y-2">
+              <div className="flex items-end gap-3">
+                <Textarea
+                  id="flatwatch-chat-input"
+                  name="chatPrompt"
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      void handleSend();
+                    }
+                  }}
+                  placeholder="Ask about transactions, receipts, challenges, or compliance..."
+                  disabled={!runtime.agent_access || sending || runtimeLoading}
+                  rows={2}
+                  className="min-h-[88px] flex-1"
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  onClick={() => void handleSend()}
+                  disabled={!input.trim() || !runtime.agent_access || sending || runtimeLoading}
+                  aria-label="Send message"
+                >
+                  <ArrowUp className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-[var(--ui-text-secondary)]">
+                Trust status controls elevated actions independently.
+              </p>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            {messages.length === 0 ? (
+              <div className="flex h-full min-h-[280px] items-center justify-center">
+                <Badge tone="neutral">Waiting for your first question</Badge>
+              </div>
+            ) : (
+              messages.map((message, index) => (
+                <div
+                  key={`${message.role}-${index}`}
+                  className={message.role === 'user' ? 'ml-auto max-w-[85%]' : 'mr-auto max-w-[85%]'}
+                >
+                  <div
+                    className={
+                      message.role === 'user'
+                        ? 'rounded-[var(--ui-radius-lg)] bg-[var(--ui-primary)] px-4 py-3 text-sm font-medium text-white shadow-[0_10px_24px_rgba(234,106,42,0.24)]'
+                        : 'rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-white px-4 py-3 text-sm text-[var(--ui-text)] shadow-[var(--ui-shadow-sm)]'
+                    }
+                  >
+                    <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.12em] opacity-70">
+                      {message.role === 'user' ? 'You' : 'Assistant'}
+                    </div>
+                    <div className="whitespace-pre-wrap">{message.content}</div>
+                  </div>
+                </div>
+              ))
+            )}
+
+            {streamingText ? (
+              <div className="mr-auto max-w-[85%] rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-white px-4 py-3 text-sm text-[var(--ui-text)] shadow-[var(--ui-shadow-sm)]">
+                <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.12em] opacity-70">Assistant</div>
+                <div className="whitespace-pre-wrap">{streamingText}</div>
+              </div>
+            ) : null}
+
+            {sending && !streamingText ? (
+              <div className="mr-auto max-w-[85%] rounded-[var(--ui-radius-lg)] border border-[var(--ui-border)] bg-white px-4 py-3 text-sm text-[var(--ui-text-secondary)] shadow-[var(--ui-shadow-sm)]">
+                Assistant is thinking…
+              </div>
+            ) : null}
+            <div ref={messagesEndRef} />
+          </div>
+        </ChatLayout>
       </div>
     </PageLayout>
   );
