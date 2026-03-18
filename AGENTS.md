@@ -2,7 +2,7 @@
 
 ## Instruction Inheritance
 
-- Read `/Users/gurusharan/Documents/remote-claude/CodexWorkspace/AGENTS.md` first for portfolio-wide governance.
+- Read `../AGENTS.md` first for portfolio-wide governance.
 - This file adds only `flatwatch`-specific execution guidance.
 - If this file conflicts with the root workspace `AGENTS.md`, the root file wins unless it explicitly allows a repo-local exception.
 - `CLAUDE.md` is optional context and not a separate policy authority.
@@ -13,5 +13,5 @@
 
 ## Repo-Specific Verification
 
-- Backend changes should be validated from `/Users/gurusharan/Documents/remote-claude/CodexWorkspace/flatwatch/backend`.
-- Frontend changes should be validated from `/Users/gurusharan/Documents/remote-claude/CodexWorkspace/flatwatch/frontend`.
+- Backend changes should be validated from `backend`.
+- Frontend changes should be validated from `frontend`.
