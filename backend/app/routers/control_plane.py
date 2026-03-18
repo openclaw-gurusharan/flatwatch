@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -23,6 +23,28 @@ from ..rbac import require_resident
 from ..trust import fetch_trust_snapshot
 
 router = APIRouter(tags=["Control Plane"])
+
+
+def _persist_runtime_session(
+    *,
+    session: dict[str, Any],
+    user_id: int,
+    wallet_address: Optional[str],
+) -> None:
+    save_agent_session(
+        session_id=session["session_id"],
+        app_id="flatwatch",
+        user_id=user_id,
+        subject_id=session["subject_id"],
+        wallet_address=wallet_address,
+        sdk_session_id=session["sdk_session_id"],
+        trust_state=session["trust_state"],
+        mode=session["mode"],
+        allowed_capabilities=session["allowed_capabilities"],
+        task_type=session["task_type"],
+        context=session["context"],
+        messages=session["messages"],
+    )
 
 @router.get("/api/agent/runtime")
 async def get_runtime(
@@ -70,6 +92,7 @@ async def create_agent_session(
     return save_agent_session(
         session_id=session_id,
         app_id="flatwatch",
+        user_id=current_user.id,
         subject_id=current_user.email,
         wallet_address=wallet_address,
         sdk_session_id=None,
@@ -87,7 +110,7 @@ async def get_session_summary(
     session_id: str,
     current_user: User = Depends(require_resident),
 ):
-    session = get_agent_session(session_id, current_user.email)
+    session = get_agent_session(session_id, current_user.id)
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     return session
@@ -100,7 +123,7 @@ async def send_agent_message(
     current_user: User = Depends(require_resident),
     wallet_address: Optional[str] = Header(None, alias="X-Wallet-Address"),
 ):
-    session = get_agent_session(request.session_id, current_user.email)
+    session = get_agent_session(request.session_id, current_user.id)
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
@@ -113,19 +136,11 @@ async def send_agent_message(
         )
 
     session["messages"].append({"role": "user", "content": request.message, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)})
-    save_agent_session(
-        session_id=session["session_id"],
-        app_id="flatwatch",
-        subject_id=session["subject_id"],
-        wallet_address=wallet_address or session.get("wallet_address"),
-        sdk_session_id=session["sdk_session_id"],
-        trust_state=trust["state"],
-        mode=runtime.mode,
-        allowed_capabilities=runtime.allowed_capabilities,
-        task_type=session["task_type"],
-        context=session["context"],
-        messages=session["messages"],
-    )
+    session["wallet_address"] = wallet_address or session.get("wallet_address")
+    session["trust_state"] = trust["state"]
+    session["mode"] = runtime.mode
+    session["allowed_capabilities"] = runtime.allowed_capabilities
+    _persist_runtime_session(session=session, user_id=current_user.id, wallet_address=session["wallet_address"])
 
     async def event_stream():
         final_result: Optional[str] = None
@@ -148,19 +163,7 @@ async def send_agent_message(
             usage = record_usage(current_user.email, "flatwatch", estimated_cost_usd)
             yield f"data: {json.dumps({'type': 'usage', 'usage': usage.model_dump(), 'timestamp': int(datetime.now(timezone.utc).timestamp() * 1000)})}\n\n"
 
-        save_agent_session(
-            session_id=session["session_id"],
-            app_id="flatwatch",
-            subject_id=session["subject_id"],
-            wallet_address=session["wallet_address"],
-            sdk_session_id=session["sdk_session_id"],
-            trust_state=session["trust_state"],
-            mode=session["mode"],
-            allowed_capabilities=session["allowed_capabilities"],
-            task_type=session["task_type"],
-            context=session["context"],
-            messages=session["messages"],
-        )
+        _persist_runtime_session(session=session, user_id=current_user.id, wallet_address=session["wallet_address"])
 
         yield "data: [DONE]\n\n"
 

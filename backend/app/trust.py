@@ -1,7 +1,11 @@
+import logging
 import os
 from typing import Optional, TypedDict
 
 import httpx
+
+logger = logging.getLogger(__name__)
+
 
 class TrustSnapshot(TypedDict):
     state: str
@@ -39,9 +43,17 @@ async def fetch_trust_snapshot(wallet_address: Optional[str]) -> TrustSnapshot:
                 "eligible": trust_data["high_trust_eligible"],
                 "reason": trust_data.get("state_reason"),
             }
-    except Exception as error:
+    except httpx.RequestError:
+        logger.warning("Trust service request failed for wallet %s", wallet_address, exc_info=True)
         return {
             "state": "no_identity",
             "eligible": False,
-            "reason": str(error),
+            "reason": "Could not connect to the trust service.",
+        }
+    except Exception:
+        logger.exception("Unexpected trust lookup failure for wallet %s", wallet_address)
+        return {
+            "state": "no_identity",
+            "eligible": False,
+            "reason": "An unexpected error occurred while fetching trust status.",
         }

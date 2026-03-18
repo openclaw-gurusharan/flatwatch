@@ -1,6 +1,6 @@
 # Chat router for FlatWatch
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
@@ -28,6 +28,28 @@ class ChatResponse(BaseModel):
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
 
+def _persist_chat_session(
+    *,
+    session: dict[str, Any],
+    user_id: int,
+    wallet_address: Optional[str],
+) -> None:
+    save_agent_session(
+        session_id=session["session_id"],
+        app_id="flatwatch",
+        user_id=user_id,
+        subject_id=session["subject_id"],
+        wallet_address=wallet_address,
+        sdk_session_id=session["sdk_session_id"],
+        trust_state=session["trust_state"],
+        mode=session["mode"],
+        allowed_capabilities=session["allowed_capabilities"],
+        task_type=session["task_type"],
+        context=session["context"],
+        messages=session["messages"],
+    )
+
+
 @router.post("/query", response_model=ChatResponse)
 async def chat_query(
     request: ChatRequest,
@@ -46,11 +68,12 @@ async def chat_query(
             detail=runtime.blocked_reason or "Claude Agent runtime is unavailable.",
         )
     session_id = request.session_id or f"chat-{current_user.id}"
-    existing = get_agent_session(session_id, current_user.email)
+    existing = get_agent_session(session_id, current_user.id)
     mode = runtime.mode
     session = existing or {
         "session_id": session_id,
         "app_id": "flatwatch",
+        "user_id": current_user.id,
         "subject_id": current_user.email,
         "wallet_address": wallet_address,
         "sdk_session_id": None,
@@ -64,19 +87,11 @@ async def chat_query(
         "updated_at": "",
     }
     session["messages"].append({"role": "user", "content": request.query, "timestamp": 0})
-    save_agent_session(
-        session_id=session_id,
-        app_id="flatwatch",
-        subject_id=current_user.email,
-        wallet_address=wallet_address,
-        sdk_session_id=session["sdk_session_id"],
-        trust_state=trust["state"],
-        mode=mode,
-        allowed_capabilities=runtime.allowed_capabilities,
-        task_type="compat_chat",
-        context={},
-        messages=session["messages"],
-    )
+    session["wallet_address"] = wallet_address
+    session["trust_state"] = trust["state"]
+    session["mode"] = mode
+    session["allowed_capabilities"] = runtime.allowed_capabilities
+    _persist_chat_session(session=session, user_id=current_user.id, wallet_address=wallet_address)
 
     final_result = "I could not generate a response."
     latest_sdk_session_id = session["sdk_session_id"]
@@ -89,19 +104,7 @@ async def chat_query(
 
     session["sdk_session_id"] = latest_sdk_session_id
     session["messages"].append({"role": "assistant", "content": final_result, "timestamp": 0})
-    save_agent_session(
-        session_id=session_id,
-        app_id="flatwatch",
-        subject_id=current_user.email,
-        wallet_address=wallet_address,
-        sdk_session_id=session["sdk_session_id"],
-        trust_state=trust["state"],
-        mode=mode,
-        allowed_capabilities=runtime.allowed_capabilities,
-        task_type="compat_chat",
-        context={},
-        messages=session["messages"],
-    )
+    _persist_chat_session(session=session, user_id=current_user.id, wallet_address=wallet_address)
     record_usage(current_user.email, "flatwatch", estimated_cost_usd)
     return {
         "query": request.query,

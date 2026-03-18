@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Literal, Optional, TypedDict
 
 from fastapi import Request
 from pydantic import BaseModel
 
+from .database import get_db
 from .runtime_config import AgentAuthMode, resolve_runtime_policy
 
 AppId = Literal["flatwatch", "ondc-buyer", "ondc-seller"]
@@ -19,9 +19,6 @@ PortfolioTrustState = Literal[
     "revoked_or_blocked",
 ]
 SessionMode = Literal["blocked", "read_only", "full"]
-
-WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
-STORE_PATH = WORKSPACE_ROOT / "shared" / "agent-control-plane" / "data" / "control-plane-store.json"
 
 
 class UsageSnapshot(BaseModel):
@@ -82,6 +79,7 @@ class StoredUsageRecord(TypedDict):
 class StoredSessionRecord(TypedDict):
     session_id: str
     app_id: AppId
+    user_id: int
     subject_id: str
     wallet_address: Optional[str]
     sdk_session_id: Optional[str]
@@ -93,12 +91,6 @@ class StoredSessionRecord(TypedDict):
     messages: list[dict[str, Any]]
     created_at: str
     updated_at: str
-
-
-class ControlPlaneStore(TypedDict, total=False):
-    usage: list[StoredUsageRecord]
-    sessions: list[StoredSessionRecord]
-    entitlements: list[dict[str, Any]]
 
 
 APP_CAPABILITIES: dict[AppId, dict[str, list[str]]] = {
@@ -137,60 +129,82 @@ def _default_usage(subject_id: str, app_id: AppId) -> StoredUsageRecord:
     }
 
 
-def _ensure_store() -> None:
-    STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    if not STORE_PATH.exists():
-        STORE_PATH.write_text(json.dumps({"usage": [], "sessions": []}, indent=2))
-
-
-def _normalize_usage(record: dict[str, Any]) -> Optional[StoredUsageRecord]:
-    subject_id = record.get("subject_id")
-    app_id = record.get("app_id")
-    if not isinstance(subject_id, str) or app_id not in {"flatwatch", "ondc-buyer", "ondc-seller"}:
-        return None
-
+def _usage_from_row(row: Any) -> StoredUsageRecord:
     return {
-        "subject_id": subject_id,
-        "app_id": app_id,
-        "requests_used": int(record.get("requests_used", 0) or 0),
-        "requests_limit": int(record.get("requests_limit", 0) or 0),
-        "period_start": record.get("period_start") or _now_iso(),
-        "period_end": record.get("period_end") or _default_period_end(),
-        "estimated_cost_usd": float(record.get("estimated_cost_usd", 0.0) or 0.0),
+        "subject_id": row["subject_id"],
+        "app_id": row["app_id"],
+        "requests_used": int(row["requests_used"]),
+        "requests_limit": int(row["requests_limit"]),
+        "period_start": row["period_start"],
+        "period_end": row["period_end"],
+        "estimated_cost_usd": float(row["estimated_cost_usd"]),
     }
 
 
-def _read_store() -> ControlPlaneStore:
-    _ensure_store()
-    raw = json.loads(STORE_PATH.read_text())
-    usage_source = raw.get("usage") or raw.get("entitlements") or []
-    usage = [
-        normalized
-        for normalized in (_normalize_usage(record) for record in usage_source if isinstance(record, dict))
-        if normalized is not None
-    ]
-    sessions = raw.get("sessions") if isinstance(raw.get("sessions"), list) else []
+def _session_from_row(row: Any) -> StoredSessionRecord:
     return {
-        "usage": usage,
-        "sessions": sessions,
+        "session_id": row["session_id"],
+        "app_id": row["app_id"],
+        "user_id": int(row["user_id"]),
+        "subject_id": row["subject_id"],
+        "wallet_address": row["wallet_address"],
+        "sdk_session_id": row["sdk_session_id"],
+        "trust_state": row["trust_state"],
+        "mode": row["mode"],
+        "allowed_capabilities": json.loads(row["allowed_capabilities"]),
+        "task_type": row["task_type"],
+        "context": json.loads(row["context_json"]),
+        "messages": json.loads(row["messages_json"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
     }
 
 
-def _write_store(store: ControlPlaneStore) -> None:
-    _ensure_store()
-    STORE_PATH.write_text(json.dumps({"usage": store.get("usage", []), "sessions": store.get("sessions", [])}, indent=2))
+def _session_summary(record: StoredSessionRecord) -> AgentSessionSummary:
+    return AgentSessionSummary(
+        app_id=record["app_id"],
+        session_id=record["session_id"],
+        sdk_session_id=record.get("sdk_session_id"),
+        subject_id=record["subject_id"],
+        trust_state=record["trust_state"],
+        mode=record["mode"],
+        allowed_capabilities=record["allowed_capabilities"],
+        created_at=record["created_at"],
+        updated_at=record["updated_at"],
+    )
 
 
 def get_or_create_usage(subject_id: str, app_id: AppId) -> StoredUsageRecord:
-    store = _read_store()
-    for record in store.get("usage", []):
-        if record["subject_id"] == subject_id and record["app_id"] == app_id:
-            return record
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT subject_id, app_id, requests_used, requests_limit, period_start, period_end, estimated_cost_usd
+            FROM agent_usage
+            WHERE subject_id = ? AND app_id = ?
+            """,
+            (subject_id, app_id),
+        ).fetchone()
+        if row is not None:
+            return _usage_from_row(row)
 
-    record = _default_usage(subject_id, app_id)
-    store.setdefault("usage", []).append(record)
-    _write_store(store)
-    return record
+        record = _default_usage(subject_id, app_id)
+        conn.execute(
+            """
+            INSERT INTO agent_usage (
+                subject_id, app_id, requests_used, requests_limit, period_start, period_end, estimated_cost_usd
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record["subject_id"],
+                record["app_id"],
+                record["requests_used"],
+                record["requests_limit"],
+                record["period_start"],
+                record["period_end"],
+                record["estimated_cost_usd"],
+            ),
+        )
+        return record
 
 
 def build_runtime_snapshot(
@@ -242,23 +256,54 @@ def build_runtime_snapshot(
 
 
 def record_usage(subject_id: str, app_id: AppId, incremental_cost_usd: float = 0.0) -> UsageSnapshot:
-    store = _read_store()
-    updated: Optional[StoredUsageRecord] = None
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT subject_id, app_id, requests_used, requests_limit, period_start, period_end, estimated_cost_usd
+            FROM agent_usage
+            WHERE subject_id = ? AND app_id = ?
+            """,
+            (subject_id, app_id),
+        ).fetchone()
 
-    for record in store.get("usage", []):
-        if record["subject_id"] == subject_id and record["app_id"] == app_id:
-            record["requests_used"] += 1
-            record["estimated_cost_usd"] = round(record["estimated_cost_usd"] + incremental_cost_usd, 6)
-            updated = record
-            break
+        if row is None:
+            updated = _default_usage(subject_id, app_id)
+            updated["requests_used"] = 1
+            updated["estimated_cost_usd"] = round(incremental_cost_usd, 6)
+            conn.execute(
+                """
+                INSERT INTO agent_usage (
+                    subject_id, app_id, requests_used, requests_limit, period_start, period_end, estimated_cost_usd
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    updated["subject_id"],
+                    updated["app_id"],
+                    updated["requests_used"],
+                    updated["requests_limit"],
+                    updated["period_start"],
+                    updated["period_end"],
+                    updated["estimated_cost_usd"],
+                ),
+            )
+        else:
+            updated = _usage_from_row(row)
+            updated["requests_used"] += 1
+            updated["estimated_cost_usd"] = round(updated["estimated_cost_usd"] + incremental_cost_usd, 6)
+            conn.execute(
+                """
+                UPDATE agent_usage
+                SET requests_used = ?, estimated_cost_usd = ?
+                WHERE subject_id = ? AND app_id = ?
+                """,
+                (
+                    updated["requests_used"],
+                    updated["estimated_cost_usd"],
+                    subject_id,
+                    app_id,
+                ),
+            )
 
-    if updated is None:
-        updated = _default_usage(subject_id, app_id)
-        updated["requests_used"] = 1
-        updated["estimated_cost_usd"] = round(incremental_cost_usd, 6)
-        store.setdefault("usage", []).append(updated)
-
-    _write_store(store)
     return UsageSnapshot(
         requests_used=updated["requests_used"],
         requests_limit=updated["requests_limit"],
@@ -272,6 +317,7 @@ def save_agent_session(
     *,
     session_id: str,
     app_id: AppId,
+    user_id: int,
     subject_id: str,
     wallet_address: Optional[str],
     sdk_session_id: Optional[str],
@@ -282,66 +328,80 @@ def save_agent_session(
     context: dict[str, Any],
     messages: list[dict[str, Any]],
 ) -> AgentSessionSummary:
-    store = _read_store()
     timestamp = _now_iso()
-    existing = next(
-        (
-            item
-            for item in store.get("sessions", [])
-            if item["session_id"] == session_id and item["app_id"] == app_id and item["subject_id"] == subject_id
-        ),
-        None,
-    )
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT session_id, user_id, created_at FROM agent_sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if existing is not None and int(existing["user_id"]) != user_id:
+            raise ValueError("Session belongs to a different user.")
 
-    if existing is None:
-        existing = {
-            "session_id": session_id,
-            "app_id": app_id,
-            "subject_id": subject_id,
-            "wallet_address": wallet_address,
-            "sdk_session_id": sdk_session_id,
-            "trust_state": trust_state,
-            "mode": mode,
-            "allowed_capabilities": allowed_capabilities,
-            "task_type": task_type,
-            "context": context,
-            "messages": messages,
-            "created_at": timestamp,
-            "updated_at": timestamp,
-        }
-        store.setdefault("sessions", []).append(existing)
-    else:
-        existing.update(
-            {
-                "wallet_address": wallet_address,
-                "sdk_session_id": sdk_session_id,
-                "trust_state": trust_state,
-                "mode": mode,
-                "allowed_capabilities": allowed_capabilities,
-                "task_type": task_type,
-                "context": context,
-                "messages": messages,
-                "updated_at": timestamp,
-            }
+        created_at = existing["created_at"] if existing is not None else timestamp
+        conn.execute(
+            """
+            INSERT INTO agent_sessions (
+                session_id, app_id, user_id, subject_id, wallet_address, sdk_session_id,
+                trust_state, mode, allowed_capabilities, task_type, context_json, messages_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+                app_id = excluded.app_id,
+                user_id = excluded.user_id,
+                subject_id = excluded.subject_id,
+                wallet_address = excluded.wallet_address,
+                sdk_session_id = excluded.sdk_session_id,
+                trust_state = excluded.trust_state,
+                mode = excluded.mode,
+                allowed_capabilities = excluded.allowed_capabilities,
+                task_type = excluded.task_type,
+                context_json = excluded.context_json,
+                messages_json = excluded.messages_json,
+                updated_at = excluded.updated_at
+            """,
+            (
+                session_id,
+                app_id,
+                user_id,
+                subject_id,
+                wallet_address,
+                sdk_session_id,
+                trust_state,
+                mode,
+                json.dumps(allowed_capabilities),
+                task_type,
+                json.dumps(context),
+                json.dumps(messages),
+                created_at,
+                timestamp,
+            ),
         )
+        row = conn.execute(
+            """
+            SELECT session_id, app_id, user_id, subject_id, wallet_address, sdk_session_id,
+                   trust_state, mode, allowed_capabilities, task_type, context_json, messages_json,
+                   created_at, updated_at
+            FROM agent_sessions
+            WHERE session_id = ? AND user_id = ?
+            """,
+            (session_id, user_id),
+        ).fetchone()
 
-    _write_store(store)
-    return AgentSessionSummary(
-        app_id=app_id,
-        session_id=existing["session_id"],
-        sdk_session_id=existing.get("sdk_session_id"),
-        subject_id=existing["subject_id"],
-        trust_state=existing["trust_state"],
-        mode=existing["mode"],
-        allowed_capabilities=existing["allowed_capabilities"],
-        created_at=existing["created_at"],
-        updated_at=existing["updated_at"],
-    )
+    return _session_summary(_session_from_row(row))
 
 
-def get_agent_session(session_id: str, subject_id: str) -> Optional[StoredSessionRecord]:
-    store = _read_store()
-    for session in store.get("sessions", []):
-        if session["session_id"] == session_id and session["subject_id"] == subject_id:
-            return session
-    return None
+def get_agent_session(session_id: str, user_id: int) -> Optional[StoredSessionRecord]:
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT session_id, app_id, user_id, subject_id, wallet_address, sdk_session_id,
+                   trust_state, mode, allowed_capabilities, task_type, context_json, messages_json,
+                   created_at, updated_at
+            FROM agent_sessions
+            WHERE session_id = ? AND user_id = ?
+            """,
+            (session_id, user_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return _session_from_row(row)

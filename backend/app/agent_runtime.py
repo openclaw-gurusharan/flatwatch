@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import inspect
 import os
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
-from .database import get_db_connection
+from .database import get_db
 from .runtime_config import resolve_runtime_policy
 
 try:
     from claude_agent_sdk import ClaudeAgentOptions, query
-except Exception:  # pragma: no cover - exercised only when SDK missing
+except ImportError:  # pragma: no cover - exercised only when SDK missing
     ClaudeAgentOptions = None
     query = None
 
@@ -19,40 +20,39 @@ def _now_ms() -> int:
 
 
 def _build_context_snapshot() -> dict[str, Any]:
-    conn = get_db_connection()
-    summary_row = conn.execute(
-        """
-        SELECT
-          COALESCE(SUM(CASE WHEN transaction_type = 'inflow' THEN amount ELSE 0 END), 0) AS inflow,
-          COALESCE(SUM(CASE WHEN transaction_type = 'outflow' THEN amount ELSE 0 END), 0) AS outflow,
-          COALESCE(SUM(CASE WHEN transaction_type = 'inflow' THEN amount ELSE -amount END), 0) AS balance,
-          COALESCE(SUM(CASE WHEN verified = 0 THEN 1 ELSE 0 END), 0) AS unverified_count
-        FROM transactions
-        """
-    ).fetchone()
-    recent_transactions = [
-        dict(row)
-        for row in conn.execute(
+    with get_db() as conn:
+        summary_row = conn.execute(
             """
-            SELECT id, amount, transaction_type, description, vpa, timestamp, verified
+            SELECT
+              COALESCE(SUM(CASE WHEN transaction_type = 'inflow' THEN amount ELSE 0 END), 0) AS inflow,
+              COALESCE(SUM(CASE WHEN transaction_type = 'outflow' THEN amount ELSE 0 END), 0) AS outflow,
+              COALESCE(SUM(CASE WHEN transaction_type = 'inflow' THEN amount ELSE -amount END), 0) AS balance,
+              COALESCE(SUM(CASE WHEN verified = 0 THEN 1 ELSE 0 END), 0) AS unverified_count
             FROM transactions
-            ORDER BY timestamp DESC
-            LIMIT 5
             """
-        ).fetchall()
-    ]
-    recent_challenges = [
-        dict(row)
-        for row in conn.execute(
-            """
-            SELECT id, transaction_id, reason, status, created_at
-            FROM challenges
-            ORDER BY created_at DESC
-            LIMIT 5
-            """
-        ).fetchall()
-    ]
-    conn.close()
+        ).fetchone()
+        recent_transactions = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT id, amount, transaction_type, description, vpa, timestamp, verified
+                FROM transactions
+                ORDER BY timestamp DESC
+                LIMIT 5
+                """
+            ).fetchall()
+        ]
+        recent_challenges = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT id, transaction_id, reason, status, created_at
+                FROM challenges
+                ORDER BY created_at DESC
+                LIMIT 5
+                """
+            ).fetchall()
+        ]
 
     return {
         "summary": {
@@ -135,16 +135,18 @@ async def stream_agent_response(
         sdk_session_id = session.get("sdk_session_id")
         runtime_policy = resolve_runtime_policy()
         context_snapshot = _build_context_snapshot()
-        options = ClaudeAgentOptions(
-            model=runtime_snapshot["model"],
-            resume=sdk_session_id or None,
-            tools=[],
-            allowed_tools=[],
-            permission_mode="default",
-            include_partial_messages=True,
-            cwd=os.getcwd(),
-            cli_path=runtime_policy.claude_code_executable_path,
-        )
+        options_kwargs: dict[str, Any] = {
+            "model": runtime_snapshot["model"],
+            "resume": sdk_session_id or None,
+            "tools": [],
+            "allowed_tools": [],
+            "permission_mode": "default",
+            "include_partial_messages": True,
+            "cwd": os.getcwd(),
+        }
+        if "cli_path" in inspect.signature(ClaudeAgentOptions).parameters:
+            options_kwargs["cli_path"] = runtime_policy.claude_code_executable_path
+        options = ClaudeAgentOptions(**options_kwargs)
         compiled_prompt = (
             "You are the FlatWatch portfolio agent.\n"
             f"Mode: {session['mode']}\n"

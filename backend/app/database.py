@@ -86,6 +86,19 @@ def init_db() -> None:
             )
         """)
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent_usage (
+                subject_id TEXT NOT NULL,
+                app_id TEXT NOT NULL,
+                requests_used INTEGER NOT NULL DEFAULT 0,
+                requests_limit INTEGER NOT NULL DEFAULT 0,
+                period_start TEXT NOT NULL,
+                period_end TEXT NOT NULL,
+                estimated_cost_usd REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (subject_id, app_id)
+            )
+        """)
+
         conn.commit()
 
     # Initialize audit tables
