@@ -1,5 +1,7 @@
 # FlatWatch – Society Transparency System
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/openclaw-gurusharan/flatwatch)
+
 > AI-powered web application for financial transparency and accountability in Indian housing societies.
 
 A proof-of-concept (POC) application designed to enhance transparency in housing society financial management through automated transaction tracking, receipt verification, AI-powered queries, and a public dashboard for accountability.
@@ -88,8 +90,8 @@ society-transparency-system/
    Create `frontend/.env.local`:
 
    ```bash
-   NEXT_PUBLIC_API_URL=http://localhost:8000
-   NEXT_PUBLIC_IDENTITY_URL=http://localhost:3000
+   NEXT_PUBLIC_API_URL=http://127.0.0.1:43104
+   NEXT_PUBLIC_IDENTITY_URL=http://127.0.0.1:43100
    ```
 
 ### Development
@@ -110,9 +112,9 @@ society-transparency-system/
    ```
 
 3. **Access the application**
-   - Frontend: <http://localhost:3000>
-   - Backend API: <http://localhost:8000>
-   - API Docs: <http://localhost:8000/api/docs>
+   - Frontend: <http://127.0.0.1:43105>
+   - Backend API: <http://127.0.0.1:43104>
+   - API Docs: <http://127.0.0.1:43104/api/docs>
 
 ## 🔐 Authentication
 
