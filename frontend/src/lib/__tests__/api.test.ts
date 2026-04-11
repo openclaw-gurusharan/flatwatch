@@ -38,7 +38,7 @@ describe('flatwatch API client', () => {
     await transactionsApi.list();
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:8001/api/transactions?',
+      'http://127.0.0.1:43104/api/transactions?',
       expect.objectContaining({
         headers: expect.any(Headers),
       })

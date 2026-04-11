@@ -52,7 +52,7 @@ describe('flatwatch auth provider', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:8001/api/auth/verify',
+      'http://127.0.0.1:43104/api/auth/verify',
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({
@@ -110,7 +110,7 @@ describe('flatwatch auth provider', () => {
     });
 
     expect(global.fetch).toHaveBeenLastCalledWith(
-      'http://127.0.0.1:8001/api/auth/login',
+      'http://127.0.0.1:43104/api/auth/login',
       expect.objectContaining({
         method: 'POST',
       })
