@@ -12,7 +12,7 @@ class TrustSnapshot(TypedDict):
     eligible: bool
     reason: Optional[str]
 
-TRUST_API_URL = os.getenv("TRUST_API_URL", "http://127.0.0.1:8000")
+TRUST_API_URL = os.getenv("TRUST_API_URL", "http://127.0.0.1:43101")
 
 
 async def fetch_trust_snapshot(wallet_address: Optional[str]) -> TrustSnapshot:
