@@ -65,5 +65,5 @@ def test_database_file_created():
 
 def test_cors_headers(client):
     """Test CORS middleware is configured."""
-    response = client.get("/", headers={"Origin": "http://localhost:3000"})
+    response = client.get("/", headers={"Origin": "http://localhost:43105"})
     assert response.status_code == 200
