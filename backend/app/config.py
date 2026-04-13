@@ -7,7 +7,8 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 # SQLite database path
-DATABASE_PATH = DATA_DIR / "flatwatch.db"
+DATABASE_PATH = Path(os.getenv("FLATWATCH_DATABASE_PATH", str(DATA_DIR / "flatwatch.db"))).expanduser()
+DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
 # API settings
