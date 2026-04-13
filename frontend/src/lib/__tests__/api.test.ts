@@ -38,7 +38,7 @@ describe('flatwatch API client', () => {
     await transactionsApi.list();
 
     expect(global.fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:8001/api/transactions?',
+      'http://127.0.0.1:43104/api/transactions?',
       expect.objectContaining({
         headers: expect.any(Headers),
       })
@@ -85,24 +85,53 @@ describe('flatwatch API client', () => {
 
   it('lists receipts', async () => {
     window.localStorage.setItem(AUTH_TOKEN_KEY, 'demo-token');
-    const payload = [{ filename: 'receipt.pdf', upload_date: '2024-01-01' }];
+    const payload = {
+      files: [{ filename: 'receipt.pdf', size: 512, uploaded_at: 1704067200 }],
+    };
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => payload,
     });
 
-    await expect(receiptsApi.list()).resolves.toEqual(payload);
+    await expect(receiptsApi.list()).resolves.toEqual([
+      {
+        filename: 'receipt.pdf',
+        size: 512,
+        upload_date: '2024-01-01T00:00:00.000Z',
+      },
+    ]);
   });
 
   it('processes receipt OCR', async () => {
     window.localStorage.setItem(AUTH_TOKEN_KEY, 'demo-token');
-    const payload = { filename: 'receipt.pdf', upload_date: '2024-01-01', match_status: 'matched' };
+    const payload = {
+      message: 'Processed receipt',
+      receipt: 'receipt.pdf',
+      extracted: {
+        amount: 8500,
+        date: '2024-01-01',
+        vendor: 'Water Supply Co',
+      },
+      matched_transaction: {
+        id: 42,
+      },
+      flag_level: 'green',
+    };
     (global.fetch as jest.Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => payload,
     });
 
-    await expect(receiptsApi.process('receipt.pdf')).resolves.toEqual(payload);
+    await expect(receiptsApi.process('receipt.pdf')).resolves.toEqual(
+      expect.objectContaining({
+        filename: 'receipt.pdf',
+        extracted_amount: 8500,
+        extracted_date: '2024-01-01',
+        extracted_vendor: 'Water Supply Co',
+        matched_transaction_id: 42,
+        match_status: 'matched',
+      })
+    );
   });
 
   it('queries chat', async () => {
