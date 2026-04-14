@@ -82,6 +82,12 @@ export function TrustStateProvider({ children }: { children: ReactNode }) {
 
 export function useTrustState(subjectId?: string | null) {
   const context = useContext(TrustStateContext);
-  const fallback = useTrustStateLoader(subjectId, !context);
-  return context ?? fallback;
+  const normalizedSubjectId = subjectId ?? null;
+  const contextMatchesSubject =
+    context !== null &&
+    normalizedSubjectId !== null &&
+    context.trust?.wallet_address === normalizedSubjectId;
+  const shouldUseContext = context !== null && (normalizedSubjectId === null || contextMatchesSubject);
+  const fallback = useTrustStateLoader(normalizedSubjectId, !shouldUseContext);
+  return shouldUseContext ? context : fallback;
 }

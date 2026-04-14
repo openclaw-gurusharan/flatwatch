@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import functools
 import importlib.util
 import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
+from urllib.parse import urlsplit
 
 from fastapi import Request
 
@@ -52,8 +54,6 @@ def _normalize_origin(value: Optional[str]) -> Optional[str]:
     if "://" not in candidate:
         candidate = f"https://{candidate}"
     try:
-        from urllib.parse import urlsplit
-
         parts = urlsplit(candidate)
         if not parts.scheme or not parts.netloc:
             return None
@@ -62,6 +62,7 @@ def _normalize_origin(value: Optional[str]) -> Optional[str]:
         return None
 
 
+@functools.lru_cache(maxsize=1)
 def _allowed_origins() -> set[str]:
     return {
         origin
@@ -75,11 +76,7 @@ def request_matches_allowed_origin(request: Optional[Request]) -> bool:
         return False
 
     origin = _normalize_origin(request.headers.get("origin"))
-    if origin and origin in _allowed_origins():
-        return True
-
-    referer = _normalize_origin(request.headers.get("referer"))
-    return bool(referer and referer in _allowed_origins())
+    return bool(origin and origin in _allowed_origins())
 
 
 def request_looks_local(request: Optional[Request]) -> bool:
