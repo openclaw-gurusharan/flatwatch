@@ -35,7 +35,7 @@ export interface TrustSnapshot {
 const LOCAL_IDENTITY_WEB_URL = 'http://127.0.0.1:43100';
 const DEPLOYED_IDENTITY_WEB_URL = 'https://aadharcha.in';
 const LOCAL_TRUST_API_URL = 'http://127.0.0.1:43101';
-const DEPLOYED_TRUST_API_URL = 'https://identity-aadhar-gateway.onrender.com';
+const DEPLOYED_TRUST_API_URL = 'https://identity-aadhar-gateway-main.onrender.com';
 
 export function resolveIdentityWebUrl(): string {
   if (typeof window !== 'undefined') {
